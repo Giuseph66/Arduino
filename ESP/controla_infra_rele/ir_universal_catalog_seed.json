@@ -1,0 +1,1847 @@
+{
+  "catalog_meta": {
+    "name": "IR Universal Catalog Seed",
+    "version": "0.1.0",
+    "language": "pt-BR",
+    "generated_at": "2026-05-09",
+    "purpose": "Base inicial estruturada para identificação, teste, cadastro externo e envio de comandos IR por ESP32.",
+    "important_notice": [
+      "Esta base é um seed técnico: não contém todos os códigos do mundo.",
+      "Cada comando deve carregar fonte, confiança e status de validação.",
+      "TV/projetor/áudio normalmente usam comandos simples; ar-condicionado normalmente usa estado completo.",
+      "Códigos comunitários devem ser validados no hardware antes de virar perfil confirmado."
+    ]
+  },
+  "data_policy": {
+    "confidence_levels": {
+      "high": "Fonte oficial, biblioteca reconhecida ou validação real no hardware do usuário.",
+      "medium": "Banco comunitário ou repositório público confiável, ainda sem validação local.",
+      "low": "Hipótese, relato isolado ou compatibilidade provável sem confirmação."
+    },
+    "validation_status": [
+      "untested",
+      "tested_working",
+      "tested_failed",
+      "user_captured",
+      "library_generated"
+    ],
+    "license_strategy": [
+      "Guardar source_name, source_url, license e usage_notes em todo item importado.",
+      "Não copiar bases fechadas/proprietárias em massa.",
+      "Usar Global Caché apenas como referência técnica ou mediante licença apropriada.",
+      "Preferir bases públicas/open-source e capturas feitas pelo próprio usuário."
+    ]
+  },
+  "device_types": [
+    {
+      "id": "tv",
+      "label": "Televisão",
+      "state_based": false,
+      "recommended_test_commands": [
+        "mute",
+        "volume_up",
+        "input",
+        "power_toggle"
+      ],
+      "avoid_first_test": [
+        "power_toggle"
+      ]
+    },
+    {
+      "id": "air_conditioner",
+      "label": "Ar-condicionado",
+      "state_based": true,
+      "recommended_test_commands": [
+        "power_on_cool_24_auto",
+        "power_off"
+      ],
+      "avoid_first_test": []
+    },
+    {
+      "id": "projector",
+      "label": "Projetor",
+      "state_based": false,
+      "recommended_test_commands": [
+        "menu",
+        "input",
+        "power_on",
+        "power_toggle"
+      ],
+      "avoid_first_test": [
+        "power_toggle"
+      ]
+    },
+    {
+      "id": "soundbar",
+      "label": "Soundbar",
+      "state_based": false,
+      "recommended_test_commands": [
+        "mute",
+        "volume_up",
+        "power_toggle"
+      ],
+      "avoid_first_test": [
+        "power_toggle"
+      ]
+    },
+    {
+      "id": "receiver",
+      "label": "Receiver/Home Theater",
+      "state_based": false,
+      "recommended_test_commands": [
+        "mute",
+        "volume_up",
+        "input"
+      ],
+      "avoid_first_test": [
+        "power_toggle"
+      ]
+    },
+    {
+      "id": "set_top_box",
+      "label": "Decoder/TV Box",
+      "state_based": false,
+      "recommended_test_commands": [
+        "menu",
+        "channel_up",
+        "ok"
+      ],
+      "avoid_first_test": [
+        "power_toggle"
+      ]
+    }
+  ],
+  "formats": {
+    "decoded_hex": {
+      "fields": [
+        "protocol",
+        "code_hex",
+        "bits",
+        "carrier_khz"
+      ],
+      "send_strategy": "IRremoteESP8266 protocol-specific send or generic send when available"
+    },
+    "raw": {
+      "fields": [
+        "raw_timings_us",
+        "raw_length",
+        "carrier_khz"
+      ],
+      "send_strategy": "irsend.sendRaw(raw, length, carrier_khz)"
+    },
+    "pronto_hex": {
+      "fields": [
+        "pronto_hex"
+      ],
+      "send_strategy": "convert to raw or use sendPronto when supported"
+    },
+    "lirc": {
+      "fields": [
+        "lircd_conf",
+        "button_name"
+      ],
+      "send_strategy": "parse to protocol/raw before ESP32 send"
+    },
+    "broadlink_base64": {
+      "fields": [
+        "broadlink_base64"
+      ],
+      "send_strategy": "decode Base64 payload then convert timings"
+    },
+    "global_cache_sendir": {
+      "fields": [
+        "sendir"
+      ],
+      "send_strategy": "parse frequency and timing pairs"
+    }
+  },
+  "protocols": [
+    {
+      "id": "nec",
+      "label": "NEC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        32
+      ],
+      "category": "simple_command",
+      "send_methods": [
+        "sendNEC"
+      ],
+      "notes": "Muito comum em TVs, projetores e áudio."
+    },
+    {
+      "id": "necx",
+      "label": "NECx",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        32
+      ],
+      "category": "simple_command",
+      "send_methods": [],
+      "notes": "Variante NEC; manter como candidato."
+    },
+    {
+      "id": "nec42",
+      "label": "NEC42",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        42
+      ],
+      "category": "simple_command",
+      "send_methods": [],
+      "notes": "Variante NEC longa."
+    },
+    {
+      "id": "samsung",
+      "label": "Samsung",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        32
+      ],
+      "category": "simple_command",
+      "send_methods": [
+        "sendSamsung"
+      ],
+      "notes": "Comum em TVs Samsung."
+    },
+    {
+      "id": "samsung36",
+      "label": "Samsung36",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        36
+      ],
+      "category": "simple_command",
+      "send_methods": [],
+      "notes": "Variação Samsung de 36 bits."
+    },
+    {
+      "id": "lg",
+      "label": "LG",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        28,
+        32
+      ],
+      "category": "simple_command",
+      "send_methods": [
+        "sendLG"
+      ],
+      "notes": "Família LG nativa; alguns TVs LG também aparecem como NEC."
+    },
+    {
+      "id": "sony_sirc",
+      "label": "Sony SIRC",
+      "carrier_khz_common": 40,
+      "bits_common": [
+        12,
+        15,
+        20
+      ],
+      "category": "simple_command",
+      "send_methods": [
+        "sendSony"
+      ],
+      "notes": "Muitos dispositivos Sony exigem repetição do sinal."
+    },
+    {
+      "id": "rc5",
+      "label": "Philips RC5",
+      "carrier_khz_common": 36,
+      "bits_common": [
+        12,
+        13,
+        14
+      ],
+      "category": "simple_command",
+      "send_methods": [
+        "sendRC5"
+      ],
+      "notes": "Manchester/toggle bit."
+    },
+    {
+      "id": "rc6",
+      "label": "Philips RC6",
+      "carrier_khz_common": 36,
+      "bits_common": [
+        20,
+        36
+      ],
+      "category": "simple_command",
+      "send_methods": [
+        "sendRC6"
+      ],
+      "notes": "Usado por TVs/STBs."
+    },
+    {
+      "id": "panasonic",
+      "label": "Panasonic/Kaseikyo",
+      "carrier_khz_common": 37,
+      "bits_common": [
+        48
+      ],
+      "category": "simple_command",
+      "send_methods": [
+        "sendPanasonic"
+      ],
+      "notes": "Usado em Panasonic e famílias Kaseikyo."
+    },
+    {
+      "id": "jvc",
+      "label": "JVC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        16
+      ],
+      "category": "simple_command",
+      "send_methods": [
+        "sendJVC"
+      ],
+      "notes": "TVs/projetores/áudio JVC."
+    },
+    {
+      "id": "denon",
+      "label": "Denon",
+      "carrier_khz_common": null,
+      "bits_common": [
+        15,
+        48
+      ],
+      "category": "simple_command",
+      "send_methods": [],
+      "notes": "Áudio Denon/Marantz."
+    },
+    {
+      "id": "sharp",
+      "label": "Sharp",
+      "carrier_khz_common": null,
+      "bits_common": [
+        15
+      ],
+      "category": "simple_command",
+      "send_methods": [],
+      "notes": "Não confundir com Sharp AC."
+    },
+    {
+      "id": "epson",
+      "label": "Epson",
+      "carrier_khz_common": null,
+      "bits_common": [
+        32
+      ],
+      "category": "simple_command",
+      "send_methods": [],
+      "notes": "Projetores Epson; se não houver suporte direto, usar RAW/Pronto."
+    },
+    {
+      "id": "nikai",
+      "label": "Nikai",
+      "carrier_khz_common": null,
+      "bits_common": [
+        24
+      ],
+      "category": "simple_command",
+      "send_methods": [],
+      "notes": "Aparece em alguns TVs TCL/white-label."
+    },
+    {
+      "id": "pioneer",
+      "label": "Pioneer",
+      "carrier_khz_common": null,
+      "bits_common": [
+        64
+      ],
+      "category": "simple_command",
+      "send_methods": [],
+      "notes": "Áudio/AV."
+    },
+    {
+      "id": "coolix",
+      "label": "Coolix",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        24,
+        48
+      ],
+      "category": "climate_state",
+      "send_methods": [
+        "IRCoolixAC"
+      ],
+      "notes": "HVAC; comandos podem ser stateful."
+    },
+    {
+      "id": "daikin",
+      "label": "Daikin",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        280
+      ],
+      "category": "climate_state",
+      "send_methods": [
+        "IRDaikinESP"
+      ],
+      "notes": "Ar-condicionado; estado completo, checksum."
+    },
+    {
+      "id": "daikin2",
+      "label": "Daikin2",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        312
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Variante Daikin."
+    },
+    {
+      "id": "daikin64",
+      "label": "Daikin64",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        64
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Variante Daikin curta."
+    },
+    {
+      "id": "daikin128",
+      "label": "Daikin128",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        128
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Variante Daikin."
+    },
+    {
+      "id": "daikin176",
+      "label": "Daikin176",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        176
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Variante Daikin."
+    },
+    {
+      "id": "daikin216",
+      "label": "Daikin216",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        216
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Variante Daikin com pacotes específicos."
+    },
+    {
+      "id": "gree_ac",
+      "label": "Gree AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        64
+      ],
+      "category": "climate_state",
+      "send_methods": [
+        "IRGreeAC"
+      ],
+      "notes": "Gree/OEM; submodelos devem ser salvos."
+    },
+    {
+      "id": "midea_ac",
+      "label": "Midea AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        48,
+        24
+      ],
+      "category": "climate_state",
+      "send_methods": [
+        "IRMideaAC"
+      ],
+      "notes": "Midea/Springer/Carrier/Comfee; usa checksum/inversão conforme variante."
+    },
+    {
+      "id": "fujitsu_ac",
+      "label": "Fujitsu AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        48,
+        128
+      ],
+      "category": "climate_state",
+      "send_methods": [
+        "IRFujitsuAC"
+      ],
+      "notes": "Pacotes curtos e completos."
+    },
+    {
+      "id": "samsung_ac",
+      "label": "Samsung AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        112,
+        168
+      ],
+      "category": "climate_state",
+      "send_methods": [
+        "IRSamsungAc"
+      ],
+      "notes": "Mensagens estendidas em alguns recursos."
+    },
+    {
+      "id": "mitsubishi_ac",
+      "label": "Mitsubishi AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        88,
+        112,
+        136,
+        144,
+        152
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Múltiplas famílias incompatíveis."
+    },
+    {
+      "id": "toshiba_ac",
+      "label": "Toshiba AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        56,
+        72,
+        80
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Alguns modelos usam dois pacotes."
+    },
+    {
+      "id": "hitachi_ac",
+      "label": "Hitachi AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        224,
+        264,
+        296,
+        344,
+        424
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Famílias longas e múltiplas."
+    },
+    {
+      "id": "carrier_ac",
+      "label": "Carrier AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        40,
+        64,
+        84,
+        128
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Subfamílias por tamanho."
+    },
+    {
+      "id": "whirlpool_ac",
+      "label": "Whirlpool AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        168
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Stateful."
+    },
+    {
+      "id": "electra_ac",
+      "label": "Electra AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        104
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Stateful."
+    },
+    {
+      "id": "haier_ac",
+      "label": "Haier AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        72,
+        112,
+        160,
+        176
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "Múltiplas famílias."
+    },
+    {
+      "id": "kelvinator",
+      "label": "Kelvinator",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        128
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "HVAC."
+    },
+    {
+      "id": "neoclima",
+      "label": "Neoclima",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        96
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "HVAC."
+    },
+    {
+      "id": "tcl112",
+      "label": "TCL112",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        112
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "HVAC TCL/Electrolux/Fuego em alguns casos."
+    },
+    {
+      "id": "sharp_ac",
+      "label": "Sharp AC",
+      "carrier_khz_common": 38,
+      "bits_common": [
+        104
+      ],
+      "category": "climate_state",
+      "send_methods": [],
+      "notes": "HVAC; diferente de Sharp simples."
+    },
+    {
+      "id": "raw",
+      "label": "RAW",
+      "carrier_khz_common": 38,
+      "bits_common": [],
+      "category": "fallback",
+      "send_methods": [
+        "sendRaw"
+      ],
+      "notes": "Fallback universal para sinais não decodificados."
+    }
+  ],
+  "sources": [
+    {
+      "id": "irremoteesp8266",
+      "name": "IRremoteESP8266",
+      "type": "official_library",
+      "formats": [
+        "decoded_hex",
+        "raw",
+        "climate_state"
+      ],
+      "license": "LGPL-2.1",
+      "quality": "high",
+      "usage_notes": "Boa fonte para suporte de protocolos e geração HVAC."
+    },
+    {
+      "id": "arduino_irremote",
+      "name": "Arduino-IRremote",
+      "type": "official_library",
+      "formats": [
+        "decoded_hex",
+        "raw"
+      ],
+      "license": "open_source",
+      "quality": "high",
+      "usage_notes": "Boa fonte para fundamentos, protocolos clássicos e frequências."
+    },
+    {
+      "id": "esphome_ir",
+      "name": "ESPHome IR Remote/Climate",
+      "type": "official_docs",
+      "formats": [
+        "yaml",
+        "decoded_hex",
+        "raw",
+        "pronto_hex"
+      ],
+      "license": "open_source",
+      "quality": "high",
+      "usage_notes": "Boa fonte para integração e variantes HVAC."
+    },
+    {
+      "id": "tasmota_ir_codes",
+      "name": "Tasmota Codes for IR Remotes",
+      "type": "community_database",
+      "formats": [
+        "json",
+        "decoded_hex",
+        "raw"
+      ],
+      "license": "verify_per_file",
+      "quality": "medium",
+      "usage_notes": "Útil como seed; validar antes de confirmar."
+    },
+    {
+      "id": "flipper_irdb_official",
+      "name": "Flipper Zero IRDB",
+      "type": "open_database",
+      "formats": [
+        ".ir"
+      ],
+      "license": "verify_repository_license",
+      "quality": "medium_high",
+      "usage_notes": "Boa fonte para importação após parser e deduplicação."
+    },
+    {
+      "id": "lirc",
+      "name": "LIRC Remotes Database",
+      "type": "legacy_database",
+      "formats": [
+        "lircd.conf"
+      ],
+      "license": "verify_per_database",
+      "quality": "medium_high",
+      "usage_notes": "Exige conversão/normalização."
+    },
+    {
+      "id": "smartir",
+      "name": "SmartIR",
+      "type": "community_integration",
+      "formats": [
+        "json"
+      ],
+      "license": "verify_repository_license",
+      "quality": "medium",
+      "usage_notes": "Boa referência de estrutura de catálogo."
+    },
+    {
+      "id": "global_cache",
+      "name": "Global Caché Control Tower",
+      "type": "proprietary_database",
+      "formats": [
+        "sendir",
+        "pronto_hex"
+      ],
+      "license": "proprietary",
+      "quality": "high",
+      "usage_notes": "Não usar scraping/seed sem licença; apenas referência técnica ou uso licenciado."
+    },
+    {
+      "id": "user_capture",
+      "name": "Captura do próprio usuário",
+      "type": "local_evidence",
+      "formats": [
+        "decoded_hex",
+        "raw"
+      ],
+      "license": "owned_by_user",
+      "quality": "high_when_tested",
+      "usage_notes": "Melhor fonte para confirmação prática no ambiente real."
+    }
+  ],
+  "brands": [
+    {
+      "id": "samsung",
+      "label": "Samsung",
+      "device_type_candidates": [
+        "tv",
+        "soundbar",
+        "air_conditioner"
+      ],
+      "protocol_candidates": [
+        "samsung",
+        "samsung36",
+        "samsung_ac"
+      ]
+    },
+    {
+      "id": "lg",
+      "label": "LG",
+      "device_type_candidates": [
+        "tv",
+        "soundbar",
+        "air_conditioner",
+        "projector"
+      ],
+      "protocol_candidates": [
+        "nec",
+        "lg"
+      ]
+    },
+    {
+      "id": "sony",
+      "label": "Sony",
+      "device_type_candidates": [
+        "tv",
+        "audio",
+        "projector"
+      ],
+      "protocol_candidates": [
+        "sony_sirc"
+      ]
+    },
+    {
+      "id": "panasonic",
+      "label": "Panasonic",
+      "device_type_candidates": [
+        "tv",
+        "soundbar",
+        "projector",
+        "air_conditioner"
+      ],
+      "protocol_candidates": [
+        "panasonic"
+      ]
+    },
+    {
+      "id": "tcl",
+      "label": "TCL",
+      "device_type_candidates": [
+        "tv",
+        "air_conditioner"
+      ],
+      "protocol_candidates": [
+        "nikai",
+        "nec",
+        "tcl112"
+      ]
+    },
+    {
+      "id": "gree",
+      "label": "Gree",
+      "device_type_candidates": [
+        "air_conditioner"
+      ],
+      "protocol_candidates": [
+        "gree_ac"
+      ]
+    },
+    {
+      "id": "midea",
+      "label": "Midea/Springer Midea",
+      "device_type_candidates": [
+        "air_conditioner"
+      ],
+      "protocol_candidates": [
+        "midea_ac",
+        "coolix"
+      ]
+    },
+    {
+      "id": "daikin",
+      "label": "Daikin",
+      "device_type_candidates": [
+        "air_conditioner"
+      ],
+      "protocol_candidates": [
+        "daikin",
+        "daikin2",
+        "daikin64",
+        "daikin128",
+        "daikin176",
+        "daikin216"
+      ]
+    },
+    {
+      "id": "fujitsu",
+      "label": "Fujitsu",
+      "device_type_candidates": [
+        "air_conditioner"
+      ],
+      "protocol_candidates": [
+        "fujitsu_ac"
+      ]
+    },
+    {
+      "id": "epson",
+      "label": "Epson",
+      "device_type_candidates": [
+        "projector"
+      ],
+      "protocol_candidates": [
+        "epson",
+        "nec",
+        "raw"
+      ]
+    },
+    {
+      "id": "acer",
+      "label": "Acer",
+      "device_type_candidates": [
+        "projector"
+      ],
+      "protocol_candidates": [
+        "nec",
+        "raw"
+      ]
+    },
+    {
+      "id": "sanyo",
+      "label": "Sanyo",
+      "device_type_candidates": [
+        "tv",
+        "projector"
+      ],
+      "protocol_candidates": [
+        "nec",
+        "raw"
+      ]
+    },
+    {
+      "id": "yamaha",
+      "label": "Yamaha",
+      "device_type_candidates": [
+        "receiver"
+      ],
+      "protocol_candidates": [
+        "nec",
+        "pioneer",
+        "raw"
+      ]
+    },
+    {
+      "id": "jbl",
+      "label": "JBL",
+      "device_type_candidates": [
+        "soundbar",
+        "audio"
+      ],
+      "protocol_candidates": [
+        "nec",
+        "raw"
+      ]
+    },
+    {
+      "id": "apple",
+      "label": "Apple",
+      "device_type_candidates": [
+        "set_top_box"
+      ],
+      "protocol_candidates": [
+        "nec",
+        "raw"
+      ]
+    }
+  ],
+  "command_catalog_seed": [
+    {
+      "id": "cmd_samsung_aa59_power_toggle",
+      "device_type": "tv",
+      "brand": "Samsung",
+      "model": "AA59 / Generic Samsung TV",
+      "command_key": "power_toggle",
+      "label": "Power Toggle",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "Samsung",
+          "code_hex": "0xE0E040BF",
+          "bits": 32,
+          "carrier_khz": 38
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_samsung_aa59_volume_up",
+      "device_type": "tv",
+      "brand": "Samsung",
+      "model": "AA59 / Generic Samsung TV",
+      "command_key": "volume_up",
+      "label": "Volume +",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "Samsung",
+          "code_hex": "0xE0E0E01F",
+          "bits": 32,
+          "carrier_khz": 38
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_lg_55uh8509_power",
+      "device_type": "tv",
+      "brand": "LG",
+      "model": "55UH8509 / Generic LG TV candidate",
+      "command_key": "power_toggle",
+      "label": "Power",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "NEC",
+          "code_hex": "0x20DF10EF",
+          "bits": 32,
+          "carrier_khz": 38
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_lg_55uh8509_input",
+      "device_type": "tv",
+      "brand": "LG",
+      "model": "55UH8509 / Generic LG TV candidate",
+      "command_key": "input",
+      "label": "Input",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "NEC",
+          "code_hex": "0x20DFD02F",
+          "bits": 32,
+          "carrier_khz": 38
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_sony_kdl_ex540_power_on",
+      "device_type": "tv",
+      "brand": "Sony",
+      "model": "KDL-EX540 / Sony candidate",
+      "command_key": "power_on",
+      "label": "Power On",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "Sony SIRC",
+          "code_hex": "0x750",
+          "bits": 12,
+          "carrier_khz": 40,
+          "repeat": 3
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_sony_kdl_ex540_input",
+      "device_type": "tv",
+      "brand": "Sony",
+      "model": "KDL-EX540 / Sony candidate",
+      "command_key": "input",
+      "label": "Input",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "Sony SIRC",
+          "code_hex": "0xA50",
+          "bits": 12,
+          "carrier_khz": 40,
+          "repeat": 3
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_panasonic_tx65fxw784_power",
+      "device_type": "tv",
+      "brand": "Panasonic",
+      "model": "TX65FXW784 / Generic Panasonic candidate",
+      "command_key": "power_toggle",
+      "label": "Power",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "Panasonic",
+          "code_hex": "0x40040100BCBD",
+          "bits": 48,
+          "carrier_khz": 37
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_acer_k132_power",
+      "device_type": "projector",
+      "brand": "Acer",
+      "model": "K132",
+      "command_key": "power_toggle",
+      "label": "Power",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "NEC",
+          "code_hex": "0x10C8E11E",
+          "bits": 32,
+          "carrier_khz": 38
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_sanyo_plvz4_power_toggle",
+      "device_type": "projector",
+      "brand": "Sanyo",
+      "model": "PLV-Z4",
+      "command_key": "power_toggle",
+      "label": "Power Toggle",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "NEC",
+          "code_hex": "0xCC0000FF",
+          "bits": 32,
+          "carrier_khz": 38
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_panasonic_scall70t_power",
+      "device_type": "soundbar",
+      "brand": "Panasonic",
+      "model": "SCALL70T",
+      "command_key": "power_toggle",
+      "label": "Power",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "Panasonic",
+          "code_hex": "0x40040500BCB9",
+          "bits": 48,
+          "carrier_khz": 37
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_jbl_onair24g_volume_up",
+      "device_type": "soundbar",
+      "brand": "JBL",
+      "model": "On Air 2.4G",
+      "command_key": "volume_up",
+      "label": "Volume Up",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "NEC",
+          "code_hex": "0x538521DE",
+          "bits": 32,
+          "carrier_khz": 38
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_yamaha_rxv1900_power_on",
+      "device_type": "receiver",
+      "brand": "Yamaha",
+      "model": "RX-V1900",
+      "command_key": "power_on",
+      "label": "Power On",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "NEC",
+          "code_hex": "0x7E817E81",
+          "bits": 32,
+          "carrier_khz": 38
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    },
+    {
+      "id": "cmd_appletv_gen4_menu",
+      "device_type": "set_top_box",
+      "brand": "Apple",
+      "model": "AppleTV Gen4",
+      "command_key": "menu",
+      "label": "Menu",
+      "state_based": false,
+      "representations": {
+        "decoded": {
+          "protocol": "NEC",
+          "code_hex": "0x77E1C080",
+          "bits": 32,
+          "carrier_khz": 38
+        },
+        "raw": null,
+        "pronto_hex": null
+      },
+      "source": {
+        "source_id": "tasmota_ir_codes",
+        "confidence": "medium",
+        "validation_status": "untested"
+      }
+    }
+  ],
+  "climate_profiles_seed": [
+    {
+      "id": "ac_daikin_arc433_family",
+      "device_type": "air_conditioner",
+      "brand": "Daikin",
+      "model": "ARC433 family",
+      "state_based": true,
+      "protocol_candidates": [
+        {
+          "protocol": "DAIKIN",
+          "carrier_khz": 38,
+          "bits": 280,
+          "confidence": "high",
+          "evidence_type": "official_library_class"
+        }
+      ],
+      "generator": {
+        "library": "IRremoteESP8266",
+        "class": "IRDaikinESP",
+        "strategy": "generate_state_and_send"
+      },
+      "capabilities": {
+        "temperature_c": {
+          "min": 10,
+          "max": 32,
+          "step": 1
+        },
+        "modes": [
+          "cool",
+          "heat",
+          "dry",
+          "fan",
+          "auto"
+        ],
+        "fan_speeds": [
+          "auto",
+          "low",
+          "medium",
+          "high"
+        ],
+        "swing_v": true,
+        "swing_h": false,
+        "quiet": true,
+        "turbo": true,
+        "econo": true
+      },
+      "test_states": [
+        {
+          "key": "power_on_cool_24_auto",
+          "power": true,
+          "mode": "cool",
+          "temperature_c": 24,
+          "fan": "auto",
+          "swing_v": "off",
+          "swing_h": "off"
+        },
+        {
+          "key": "power_off",
+          "power": false
+        }
+      ],
+      "source": {
+        "source_id": "irremoteesp8266",
+        "confidence": "high",
+        "validation_status": "library_generated"
+      }
+    },
+    {
+      "id": "ac_gree_generic",
+      "device_type": "air_conditioner",
+      "brand": "Gree",
+      "model": "Generic / YAN-YAA-YAC candidates",
+      "state_based": true,
+      "protocol_candidates": [
+        {
+          "protocol": "GREE_AC",
+          "carrier_khz": 38,
+          "bits": 64,
+          "confidence": "high",
+          "evidence_type": "official_library_class"
+        }
+      ],
+      "generator": {
+        "library": "IRremoteESP8266",
+        "class": "IRGreeAC",
+        "strategy": "generate_state_and_send"
+      },
+      "capabilities": {
+        "temperature_c": {
+          "min": 16,
+          "max": 30,
+          "step": 1
+        },
+        "modes": [
+          "cool",
+          "heat",
+          "dry",
+          "fan",
+          "auto"
+        ],
+        "fan_speeds": [
+          "auto",
+          "low",
+          "medium",
+          "high"
+        ],
+        "swing_v": true,
+        "swing_h": false,
+        "turbo": true,
+        "econo": true
+      },
+      "test_states": [
+        {
+          "key": "power_on_cool_24_auto",
+          "power": true,
+          "mode": "cool",
+          "temperature_c": 24,
+          "fan": "auto"
+        },
+        {
+          "key": "power_off",
+          "power": false
+        }
+      ],
+      "source": {
+        "source_id": "irremoteesp8266",
+        "confidence": "high",
+        "validation_status": "library_generated"
+      }
+    },
+    {
+      "id": "ac_midea_springer_generic",
+      "device_type": "air_conditioner",
+      "brand": "Midea/Springer Midea",
+      "model": "Generic",
+      "state_based": true,
+      "protocol_candidates": [
+        {
+          "protocol": "MIDEA_AC",
+          "carrier_khz": 38,
+          "bits": 48,
+          "confidence": "high",
+          "evidence_type": "official_library_class"
+        }
+      ],
+      "generator": {
+        "library": "IRremoteESP8266",
+        "class": "IRMideaAC",
+        "strategy": "generate_state_and_send"
+      },
+      "capabilities": {
+        "temperature_c": {
+          "min": 17,
+          "max": 30,
+          "step": 1
+        },
+        "modes": [
+          "cool",
+          "heat",
+          "dry",
+          "fan",
+          "auto"
+        ],
+        "fan_speeds": [
+          "auto",
+          "low",
+          "medium",
+          "high"
+        ],
+        "swing_v": true,
+        "swing_h": false
+      },
+      "test_states": [
+        {
+          "key": "power_on_cool_24_auto",
+          "power": true,
+          "mode": "cool",
+          "temperature_c": 24,
+          "fan": "auto"
+        },
+        {
+          "key": "power_off",
+          "power": false
+        }
+      ],
+      "source": {
+        "source_id": "irremoteesp8266",
+        "confidence": "high",
+        "validation_status": "library_generated"
+      }
+    },
+    {
+      "id": "ac_fujitsu_generic",
+      "device_type": "air_conditioner",
+      "brand": "Fujitsu",
+      "model": "Generic",
+      "state_based": true,
+      "protocol_candidates": [
+        {
+          "protocol": "FUJITSU_AC",
+          "carrier_khz": 38,
+          "bits": 128,
+          "confidence": "high",
+          "evidence_type": "official_library_class"
+        }
+      ],
+      "generator": {
+        "library": "IRremoteESP8266",
+        "class": "IRFujitsuAC",
+        "strategy": "generate_state_and_send"
+      },
+      "capabilities": {
+        "temperature_c": {
+          "min": 16,
+          "max": 30,
+          "step": 1
+        },
+        "modes": [
+          "cool",
+          "heat",
+          "dry",
+          "fan",
+          "auto"
+        ],
+        "fan_speeds": [
+          "auto",
+          "low",
+          "medium",
+          "high"
+        ],
+        "swing_v": true
+      },
+      "test_states": [
+        {
+          "key": "power_on_cool_24_auto",
+          "power": true,
+          "mode": "cool",
+          "temperature_c": 24,
+          "fan": "auto"
+        },
+        {
+          "key": "power_off",
+          "power": false
+        }
+      ],
+      "source": {
+        "source_id": "irremoteesp8266",
+        "confidence": "high",
+        "validation_status": "library_generated"
+      }
+    },
+    {
+      "id": "ac_samsung_generic",
+      "device_type": "air_conditioner",
+      "brand": "Samsung",
+      "model": "Generic",
+      "state_based": true,
+      "protocol_candidates": [
+        {
+          "protocol": "SAMSUNG_AC",
+          "carrier_khz": 38,
+          "bits": 112,
+          "confidence": "high",
+          "evidence_type": "official_library_class"
+        }
+      ],
+      "generator": {
+        "library": "IRremoteESP8266",
+        "class": "IRSamsungAc",
+        "strategy": "generate_state_and_send"
+      },
+      "capabilities": {
+        "temperature_c": {
+          "min": 16,
+          "max": 30,
+          "step": 1
+        },
+        "modes": [
+          "cool",
+          "heat",
+          "dry",
+          "fan",
+          "auto"
+        ],
+        "fan_speeds": [
+          "auto",
+          "low",
+          "medium",
+          "high"
+        ],
+        "swing_v": true
+      },
+      "test_states": [
+        {
+          "key": "power_on_cool_24_auto",
+          "power": true,
+          "mode": "cool",
+          "temperature_c": 24,
+          "fan": "auto"
+        },
+        {
+          "key": "power_off",
+          "power": false
+        }
+      ],
+      "source": {
+        "source_id": "irremoteesp8266",
+        "confidence": "high",
+        "validation_status": "library_generated"
+      }
+    }
+  ],
+  "identification_engine": {
+    "goals": [
+      "Identificar perfil funcional do aparelho por tentativa controlada.",
+      "Permitir teste automático, semiautomático e manual.",
+      "Salvar o perfil correto escolhido pelo usuário.",
+      "Permitir fallback para clonagem por receptor IR."
+    ],
+    "modes": {
+      "manual_step": "Usuário clica em 'Testar próximo'; sistema envia um candidato por vez.",
+      "auto_scan": "Sistema envia candidatos em sequência com delay configurável e usuário clica em 'Funcionou/Parar'.",
+      "reverse_delay_review": "Quando o usuário para o scan, a UI mostra os últimos N sinais enviados antes do stop para escolher o mais provável.",
+      "learn_mode": "Se nenhum candidato funcionar, sistema entra em modo captura pelo receptor IR e salva RAW/decodificado."
+    },
+    "scan_config_defaults": {
+      "delay_between_tests_ms": 1500,
+      "min_delay_ms": 300,
+      "max_delay_ms": 5000,
+      "rollback_window": 5,
+      "preferred_test_commands": [
+        "mute",
+        "volume_up",
+        "input"
+      ],
+      "avoid_power_toggle_first": true,
+      "notes": "Meio milissegundo é rápido demais para TV/IR e para observação humana. Use 300 ms a 1500 ms. Para Power, use 2s a 5s."
+    },
+    "candidate_ranking": [
+      "Filtrar por device_type.",
+      "Filtrar por brand quando informado.",
+      "Priorizar comandos com validation_status tested_working/user_captured.",
+      "Priorizar confidence high, depois medium, depois low.",
+      "Priorizar comandos seguros: mute, volume_up, input, menu.",
+      "Evitar power_toggle no primeiro teste.",
+      "Agrupar por protocolo/modelo para não repetir sinais iguais.",
+      "Se falhar, tentar protocolos prováveis da marca.",
+      "Se falhar, oferecer modo de clonagem."
+    ],
+    "workflow": [
+      {
+        "step": 1,
+        "name": "Selecionar aparelho",
+        "ui": "Usuário escolhe tipo: TV, Ar-condicionado, Projetor, Soundbar, etc."
+      },
+      {
+        "step": 2,
+        "name": "Selecionar marca",
+        "ui": "Usuário escolhe marca ou pula para modo amplo."
+      },
+      {
+        "step": 3,
+        "name": "Gerar fila de candidatos",
+        "system": "Backend cria test_queue com base em device_type, brand, protocolos prováveis e comandos seguros."
+      },
+      {
+        "step": 4,
+        "name": "Testar sinais",
+        "system": "ESP32 envia um comando por vez; UI mostra índice, protocolo, modelo candidato e botão Funcionou/Não/Parar."
+      },
+      {
+        "step": 5,
+        "name": "Confirmação secundária",
+        "system": "Ao funcionar, testar outro comando do mesmo perfil, por exemplo volume/mute/menu."
+      },
+      {
+        "step": 6,
+        "name": "Salvar perfil",
+        "system": "Salvar selected_profile com brand, model_candidate, protocol, command_map e validation_status."
+      },
+      {
+        "step": 7,
+        "name": "Caching no ESP32",
+        "system": "Enviar perfil mínimo para memória local/NVS/LittleFS para comandos rápidos."
+      },
+      {
+        "step": 8,
+        "name": "Fallback",
+        "system": "Se falhar, usar receiver IR para clonar controle original e cadastrar externamente."
+      }
+    ]
+  },
+  "api_contracts": {
+    "backend_to_esp32_send_decoded": {
+      "topic_or_endpoint": "/ir/send",
+      "payload": {
+        "type": "decoded",
+        "protocol": "NEC",
+        "code_hex": "0x20DF10EF",
+        "bits": 32,
+        "carrier_khz": 38,
+        "repeat": 1
+      }
+    },
+    "backend_to_esp32_send_raw": {
+      "topic_or_endpoint": "/ir/send",
+      "payload": {
+        "type": "raw",
+        "carrier_khz": 38,
+        "raw_timings_us": [
+          9000,
+          4500,
+          560,
+          560
+        ],
+        "repeat": 1
+      }
+    },
+    "backend_to_esp32_send_ac_state": {
+      "topic_or_endpoint": "/ir/send-ac",
+      "payload": {
+        "type": "climate_state",
+        "protocol": "GREE_AC",
+        "power": true,
+        "mode": "cool",
+        "temperature_c": 24,
+        "fan": "auto",
+        "swing_v": "off"
+      }
+    },
+    "esp32_to_backend_capture": {
+      "topic_or_endpoint": "/ir/capture",
+      "payload": {
+        "type": "captured",
+        "protocol": "UNKNOWN",
+        "code_hex": null,
+        "bits": 0,
+        "carrier_khz": 38,
+        "raw_timings_us": [
+          9000,
+          4500,
+          560,
+          560
+        ],
+        "device_hint": "tv",
+        "brand_hint": "unknown"
+      }
+    }
+  },
+  "external_registration_schema": {
+    "device_profile": {
+      "required_fields": [
+        "device_type",
+        "brand",
+        "profile_name"
+      ],
+      "optional_fields": [
+        "model",
+        "room",
+        "notes",
+        "protocol_candidates",
+        "commands",
+        "climate_capabilities"
+      ],
+      "commands_item_schema": {
+        "command_key": "power_toggle",
+        "label": "Power",
+        "representations": {
+          "decoded": {
+            "protocol": "NEC",
+            "code_hex": "0x20DF10EF",
+            "bits": 32,
+            "carrier_khz": 38
+          },
+          "raw": null,
+          "pronto_hex": null
+        },
+        "source": {
+          "source_id": "user_capture",
+          "confidence": "high",
+          "validation_status": "user_captured"
+        }
+      }
+    },
+    "user_validated_profile": {
+      "fields": [
+        "user_id",
+        "device_id",
+        "selected_catalog_id",
+        "brand",
+        "model",
+        "device_type",
+        "validated_commands",
+        "created_at",
+        "last_used_at"
+      ]
+    }
+  },
+  "database_model_recommended": {
+    "tables_or_collections": {
+      "device_types": [
+        "id",
+        "label",
+        "state_based",
+        "recommended_test_commands"
+      ],
+      "brands": [
+        "id",
+        "label",
+        "aliases",
+        "device_type_candidates",
+        "protocol_candidates"
+      ],
+      "protocols": [
+        "id",
+        "label",
+        "carrier_khz_common",
+        "bits_common",
+        "category",
+        "send_methods",
+        "notes"
+      ],
+      "catalog_profiles": [
+        "id",
+        "device_type",
+        "brand_id",
+        "model",
+        "state_based",
+        "protocol_candidates",
+        "capabilities",
+        "source_id",
+        "confidence"
+      ],
+      "commands": [
+        "id",
+        "profile_id",
+        "command_key",
+        "label",
+        "state_based",
+        "representations_json",
+        "validation_status",
+        "confidence"
+      ],
+      "sources": [
+        "id",
+        "name",
+        "type",
+        "url",
+        "license",
+        "quality",
+        "usage_notes"
+      ],
+      "test_sessions": [
+        "id",
+        "user_id",
+        "device_type",
+        "brand",
+        "status",
+        "started_at",
+        "finished_at"
+      ],
+      "test_events": [
+        "id",
+        "session_id",
+        "candidate_command_id",
+        "sent_at",
+        "user_feedback",
+        "latency_ms"
+      ],
+      "user_devices": [
+        "id",
+        "user_id",
+        "room",
+        "device_type",
+        "brand",
+        "model",
+        "selected_profile_id"
+      ],
+      "user_captured_codes": [
+        "id",
+        "user_id",
+        "device_id",
+        "protocol",
+        "code_hex",
+        "bits",
+        "raw_timings_us",
+        "carrier_khz",
+        "created_at"
+      ]
+    },
+    "recommended_storage": "PostgreSQL com JSONB para representations_json, capabilities e raw_timings_us; ou Firestore se o app já estiver em Firebase."
+  }
+}

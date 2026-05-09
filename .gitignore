@@ -1,0 +1,27 @@
+# Node.js
+node_modules/
+package-lock.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Arduino / ESP
+build/
+*.bin
+*.elf
+*.hex
+*.o
+*.a
+*.d
+*.map
+*.lst
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

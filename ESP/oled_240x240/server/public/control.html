@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle ESP32 - Seletor de Imagens</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .control-panel {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .esp32-status {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #f56565;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.connected {
+            background: #48bb78;
+        }
+        
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .image-card {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+        
+        .image-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+        }
+        
+        .image-card.selected {
+            border-color: #667eea;
+            background: #f7fafc;
+        }
+        
+        .image-card img {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .image-info {
+            text-align: center;
+        }
+        
+        .image-info h4 {
+            margin: 0 0 5px 0;
+            color: #4a5568;
+            font-size: 0.9rem;
+        }
+        
+        .image-info p {
+            margin: 0;
+            color: #718096;
+            font-size: 0.8rem;
+        }
+        
+        .control-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 30px;
+        }
+        
+        .btn-send {
+            background: linear-gradient(135deg, #48bb78, #38a169);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-send:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(72, 187, 120, 0.3);
+        }
+        
+        .btn-send:disabled {
+            background: #cbd5e0;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .btn-refresh {
+            background: linear-gradient(135deg, #4299e1, #3182ce);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-refresh:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(66, 153, 225, 0.3);
+        }
+        
+        .loading {
+            text-align: center;
+            color: #718096;
+            font-style: italic;
+            padding: 40px;
+        }
+        
+        .esp32-info {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        
+        .esp32-info h4 {
+            margin: 0 0 10px 0;
+            color: white;
+        }
+        
+        .esp32-info p {
+            margin: 5px 0;
+            color: rgba(255,255,255,0.9);
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎮 Controle ESP32</h1>
+            <p>Selecione qual imagem exibir no display</p>
+        </header>
+
+        <main>
+            <!-- Painel de Controle -->
+            <section class="control-panel">
+                <div class="esp32-status">
+                    <div class="status-indicator" id="statusIndicator"></div>
+                    <div>
+                        <h3>Status do ESP32</h3>
+                        <p id="statusText">Desconectado</p>
+                    </div>
+                </div>
+                
+                <div class="esp32-info" id="esp32Info" style="display: none;">
+                    <h4>Informações do ESP32</h4>
+                    <p><strong>IP:</strong> <span id="esp32IP">-</span></p>
+                    <p><strong>Uptime:</strong> <span id="esp32Uptime">-</span></p>
+                    <p><strong>Imagem Atual:</strong> <span id="currentImage">-</span></p>
+                    <p><strong>WiFi:</strong> <span id="wifiStatus">-</span></p>
+                </div>
+                
+                <div class="esp32-info" id="serverInfo">
+                    <h4>Configuração do Servidor</h4>
+                    <p><strong>IP do Servidor:</strong> <span id="serverIP">-</span></p>
+                    <p><strong>URL do Servidor:</strong> <span id="serverURL">-</span></p>
+                    <p style="font-size: 0.8rem; color: rgba(255,255,255,0.7);">
+                        ⚠️ Certifique-se de que o ESP32 está configurado com este IP
+                    </p>
+                </div>
+            </section>
+
+            <!-- Seletor de Imagens -->
+            <section>
+                <h3>Imagens Disponíveis</h3>
+                <div class="image-grid" id="imageGrid">
+                    <div class="loading">Carregando imagens...</div>
+                </div>
+            </section>
+
+            <!-- Botões de Controle -->
+            <section class="control-buttons">
+                <button class="btn-refresh" onclick="refreshESP32Status()">
+                    🔄 Atualizar Status
+                </button>
+                <button class="btn-send" id="sendButton" onclick="sendSelectedImage()" disabled>
+                    📡 Enviar Imagem Selecionada
+                </button>
+                <button class="btn-refresh" onclick="testDirectSend()" style="background: linear-gradient(135deg, #ed8936, #dd6b20);">
+                    🧪 Teste Direto
+                </button>
+            </section>
+        </main>
+    </div>
+
+    <script src="control.js"></script>
+</body>
+</html>

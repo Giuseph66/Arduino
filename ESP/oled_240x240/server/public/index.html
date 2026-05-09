@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Image Converter</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🖼️ ESP32 Image Converter</h1>
+            <p>Converta suas imagens para o formato ESP32 (240x240 RGB565)</p>
+            <div style="margin-top: 20px;">
+                <a href="/control" class="btn-primary" style="text-decoration: none; display: inline-block;">
+                    🎮 Controle ESP32
+                </a>
+            </div>
+        </header>
+
+        <main>
+            <!-- Área de Upload -->
+            <section class="upload-section">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-content">
+                        <div class="upload-icon">📁</div>
+                        <h3>Arraste uma imagem aqui</h3>
+                        <p>ou clique para selecionar</p>
+                        <input type="file" id="fileInput" accept="image/*" hidden>
+                        <button class="btn-primary" onclick="document.getElementById('fileInput').click()">
+                            Selecionar Imagem
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Preview da Imagem -->
+            <section class="preview-section" id="previewSection" style="display: none;">
+                <h3>Preview da Imagem</h3>
+                <div class="preview-container">
+                    <div class="preview-image">
+                        <img id="previewImg" src="" alt="Preview">
+                        <div class="preview-info">
+                            <span id="previewInfo">240x240 pixels</span>
+                        </div>
+                    </div>
+                    <div class="preview-actions">
+                        <button class="btn-secondary" onclick="clearPreview()">Limpar</button>
+                        <button class="btn-primary" onclick="convertImage()" id="convertBtn">
+                            Converter para ESP32
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Progress Bar -->
+            <section class="progress-section" id="progressSection" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p id="progressText">Convertendo imagem...</p>
+            </section>
+
+            <!-- Resultado -->
+            <section class="result-section" id="resultSection" style="display: none;">
+                <h3>✅ Conversão Concluída!</h3>
+                <div class="result-content">
+                    <div class="result-preview">
+                        <img id="resultImg" src="" alt="Resultado">
+                    </div>
+                    <div class="result-actions">
+                        <button class="btn-primary" onclick="downloadFile()" id="downloadBtn">
+                            📥 Baixar Arquivo .h
+                        </button>
+                        <button class="btn-secondary" onclick="sendToESP32()" id="sendBtn">
+                            📡 Enviar para ESP32
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Galeria de Imagens -->
+            <section class="gallery-section">
+                <h3>Imagens Convertidas</h3>
+                <div class="gallery" id="gallery">
+                    <div class="loading">Carregando imagens...</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
