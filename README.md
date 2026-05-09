@@ -60,4 +60,4 @@ Projetos avançados que utilizam conectividade, telas de alta resolução e inte
     ```
 
 ## 📜 Licença
-Este repositório está sob a licença MIT. Sinta-se à vontade para usar e modificar.
+Este repositório é de uso **restrito e privado**. O uso de qualquer conteúdo aqui presente requer a autorização expressa do proprietário. Consulte o arquivo [LICENSE](./LICENSE) para mais detalhes sobre os termos de uso e como entrar em contato.
