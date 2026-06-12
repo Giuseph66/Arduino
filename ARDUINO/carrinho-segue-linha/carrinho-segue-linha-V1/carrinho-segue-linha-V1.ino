@@ -1,16 +1,4 @@
-// Carrinho segue-linha — 2 sensores IR + ponte H (L9110/similar) + Arduino Nano
-//
-// PORTAS FIXAS (não alterar):
-//   Motor 1: AIA=2 (direção), AIB=3 (PWM)
-//   Motor 2: BIA=4 (direção), BIB=5 (PWM)
-//   Sensores: DO 6/7, AO A0/A1
-//
-// COMO AJUSTAR:
-//   1. Abra o Serial Monitor a 115200 e passe os sensores sobre a linha.
-//      Se PRETO/BRANCO aparecer invertido, troque pretoQuandoDOBaixo.
-//   2. Se o carrinho virar para o lado errado, troque SENSOR1_E_O_DA_DIREITA.
-//   3. Se ainda passar reto nas curvas, aumente velocidadeCurva (até 255)
-//      ou diminua velocidadeReta.
+// Motor 1: AIA=2, AIB=3 | Motor 2: BIA=4, BIB=5 | Sensores: AO em A0/A1
 
 #define AIA 2
 #define AIB 3
@@ -22,38 +10,25 @@ const int sensor2DO = 7;
 const int sensor1AO = A0;
 const int sensor2AO = A1;
 
-// ---------------- Ajustes principais ----------------
-const int velocidadeReta  = 60;  // reta: baixo o bastante p/ dar tempo de reagir
-const int velocidadeCurva = 150;  // pivô precisa de PWM alto, senão o motor trava
+const int velocidadeReta  = 60;
+const int velocidadeCurva = 150;
 
-// Sensor 1 fica do lado DIREITO do carrinho? (true = sim)
-// Sensor da direita vê preto -> linha fugiu p/ direita -> virar p/ direita.
 const bool SENSOR1_E_O_DA_DIREITA = false;
 
-// Se uma roda girar ao contrário no "frente", inverta o motor correspondente aqui.
 const bool MOTOR1_INVERTIDO = false;
 const bool MOTOR2_INVERTIDO = true;
 
-// Compensação de força por motor, em % (100 = sem ajuste).
-// Motor 2 sai mais fraco (inversão usa fast decay + variação entre motores).
+// Compensação de força por motor, em % (100 = sem ajuste)
 const int ganhoMotor1Pct = 100;
 const int ganhoMotor2Pct = 115;
 
-// Leitura do sensor (analógica; AO maior = preto)
-// Limite por sensor: S1 (D6/A0) tem sinal mais fraco/lento — limite mais baixo
-// para disparar mais cedo. Branco: S1 lê ~11-58, S2 lê ~11-24.
+// Branco: S1 lê ~11-58, S2 lê ~11-24. Preto sobe acima de 50/70.
 const int limitePretoS1 = 70;
 const int limitePretoS2 = 50;
-// Histerese: depois de entrar no preto, só volta a branco abaixo de
-// (limite - histerese). Evita tremer na transição.
 const int histerese = 20;
 
 const unsigned long intervaloSerialMs = 200;
-// -----------------------------------------------------
 
-// Os dois motores usam slow decay no sentido "frente" (mais torque em PWM baixo).
-// Se o motor 2 girar ao contrário, troque os dois fios dele na ponte H
-// (não dá para inverter por software mantendo o mesmo modo de PWM).
 void motor1(int velocidade) {
   if (MOTOR1_INVERTIDO) velocidade = -velocidade;
   velocidade = (int)((long)velocidade * ganhoMotor1Pct / 100);
@@ -86,18 +61,16 @@ void motor2(int velocidade) {
   }
 }
 
-// motorDireito/motorEsquerdo em função do lado físico do carrinho
 void rodas(int esquerda, int direita) {
   motor1(direita);
   motor2(esquerda);
 }
 
-void frente(int v)        { rodas(v, v); }
-void pivoDireita(int v)   { rodas(v, -v); }   // esquerda p/ frente, direita p/ trás
-void pivoEsquerda(int v)  { rodas(-v, v); }
-void parar()              { rodas(0, 0); }
+void frente(int v)       { rodas(v, v); }
+void pivoDireita(int v)  { rodas(v, -v); }
+void pivoEsquerda(int v) { rodas(-v, v); }
+void parar()             { rodas(0, 0); }
 
-// Leitura com histerese: dispara acima do limite, solta abaixo de limite-histerese
 bool lerPreto(int pinoAO, int limite, bool &estavaPreto) {
   int a = analogRead(pinoAO);
   if (estavaPreto) {
@@ -134,15 +107,9 @@ void loop() {
   unsigned long agora = millis();
   const char *acao;
 
-  // Última ação tomada: 0 = frente, 1 = virando direita, 2 = virando esquerda.
-  // Usada quando os DOIS sensores veem preto: numa curva fechada o carrinho
-  // volta pra linha em diagonal e ela fica sob os dois sensores ao mesmo
-  // tempo — não é cruzamento, é continuação da curva. Regra: dois pretos =
-  // repete o que estava fazendo (reto num cruzamento real, girando na curva).
-  static int ultimaAcao = 0;
+  static int ultimaAcao = 0; // 0 = frente, 1 = direita, 2 = esquerda
 
   if (direitaPreto && !esquerdaPreto) {
-    // Linha escapou para a direita: pivô para a direita até o sensor limpar
     pivoDireita(velocidadeCurva);
     ultimaAcao = 1;
     acao = "CURVA DIREITA";
@@ -181,5 +148,4 @@ void loop() {
     Serial.print(" | ");
     Serial.println(acao);
   }
-  // Sem delay(): loop roda o mais rápido possível, reação imediata do sensor
 }

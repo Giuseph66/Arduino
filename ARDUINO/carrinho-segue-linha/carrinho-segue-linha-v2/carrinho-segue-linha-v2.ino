@@ -1,38 +1,24 @@
-// Carrinho segue-linha V2 — 2 sensores IR analógicos + ponte H L9110 + Nano
-// Baseado no padrão clássico de 2 sensores (Circuit Digest / Arduino Project
-// Hub / QTR Pololu): lógica reativa pura + CALIBRAÇÃO AUTOMÁTICA no boot.
+// Carrinho segue-linha V2 — calibração automática no boot
+// Motor 1: AIA=2, AIB=3 | Motor 2: BIA=4, BIB=5 | Sensores: AO em A0/A1
 //
-// PORTAS FIXAS:
-//   Motor 1: AIA=2 (direção), AIB=3 (PWM)
-//   Motor 2: BIA=4 (direção), BIB=5 (PWM)
-//   Sensores: AO em A0/A1 (DO não é usado)
-//
-// COMO USAR:
-//   1. Ligue o carrinho COM OS SENSORES SOBRE A PISTA.
-//   2. O LED do Nano (pino 13) começa a piscar: você tem 5 segundos para
-//      deslizar o carrinho de um lado para o outro, passando os dois
-//      sensores sobre o preto e o branco algumas vezes.
-//   3. LED acende fixo por 1s = calibrado. Depois apaga e o carrinho anda.
-//   4. Serial 115200 mostra os limiares calculados e as leituras ao vivo.
-//
-// Sem nenhum delay no loop: leitura -> decisão -> motor, direto.
+// USO: ligue com os sensores sobre a pista. LED piscando (5s) = deslize o
+// carrinho passando os sensores sobre preto e branco. LED fixo 1s = pronto.
+// Serial 115200 mostra limiares e leituras.
 
 #define AIA 2
 #define AIB 3
 #define BIA 4
 #define BIB 5
 
-const int sensor1AO = A0; // sensor do módulo no D6 (lado esquerdo)
-const int sensor2AO = A1; // sensor do módulo no D7 (lado direito)
+const int sensor1AO = A0;
+const int sensor2AO = A1;
 
 // ---------------- Ajustes principais ----------------
 const int velocidadeReta  = 60;
 const int velocidadeCurva = 150;
 
-// Sensor 1 fica do lado DIREITO do carrinho? (true = sim)
 const bool SENSOR1_E_O_DA_DIREITA = false;
 
-// Sentido dos motores (mesma configuração que funcionou na V1)
 const bool MOTOR1_INVERTIDO = false;
 const bool MOTOR2_INVERTIDO = true;
 
@@ -40,17 +26,13 @@ const bool MOTOR2_INVERTIDO = true;
 const int ganhoMotor1Pct = 100;
 const int ganhoMotor2Pct = 115;
 
-// Calibração automática
 const unsigned long tempoCalibracaoMs = 5000;
-
 const unsigned long intervaloSerialMs = 200;
 // -----------------------------------------------------
 
-// Limiares calculados na calibração (meio entre branco e preto de cada sensor)
 int limiarS1, limiarS2;
-int histS1, histS2; // histerese = 1/8 da faixa medida de cada sensor
+int histS1, histS2;
 
-// ---------------- Motores ----------------
 void motor1(int velocidade) {
   if (MOTOR1_INVERTIDO) velocidade = -velocidade;
   velocidade = (int)((long)velocidade * ganhoMotor1Pct / 100);
@@ -93,9 +75,6 @@ void pivoDireita(int v)  { rodas(v, -v); }
 void pivoEsquerda(int v) { rodas(-v, v); }
 void parar()             { rodas(0, 0); }
 
-// ---------------- Calibração ----------------
-// Mede o mínimo (branco) e o máximo (preto) de cada sensor enquanto o
-// usuário desliza o carrinho sobre a linha. Limiar = ponto médio real.
 void calibrar() {
   int min1 = 1023, max1 = 0;
   int min2 = 1023, max2 = 0;
@@ -108,13 +87,11 @@ void calibrar() {
     if (a1 > max1) max1 = a1;
     if (a2 < min2) min2 = a2;
     if (a2 > max2) max2 = a2;
-    digitalWrite(LED_BUILTIN, (millis() / 150) % 2); // pisca = calibrando
+    digitalWrite(LED_BUILTIN, (millis() / 150) % 2);
   }
 
-  // Limiar a 1/4 da faixa (perto do branco), não no meio: o AO destes módulos
-  // sobe devagar e, com o carrinho em movimento, o pico real fica bem abaixo
-  // do preto medido parado. Limiar baixo = dispara mais cedo.
-  // Faixa pequena = sensor não passou pelo preto. Usa valores de reserva.
+  // Limiar a 1/4 da faixa: o AO sobe devagar, em movimento o pico fica
+  // bem abaixo do preto medido parado. Faixa pequena = usa reserva.
   if (max1 - min1 < 50) { limiarS1 = 70; histS1 = 10; }
   else { limiarS1 = min1 + (max1 - min1) / 4; histS1 = (max1 - min1) / 10; }
 
@@ -130,13 +107,11 @@ void calibrar() {
   Serial.print(" limiar="); Serial.print(limiarS2);
   Serial.print(" hist="); Serial.println(histS2);
 
-  digitalWrite(LED_BUILTIN, HIGH); // fixo = pronto
-  delay(1000);                     // tempo de posicionar o carrinho
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(1000);
   digitalWrite(LED_BUILTIN, LOW);
 }
 
-// Histerese simétrica: vira preto acima de (limiar+hist),
-// volta a branco abaixo de (limiar-hist). Não trava nem treme.
 bool lerPreto(int pinoAO, int limiar, int hist, bool &estavaPreto) {
   int a = analogRead(pinoAO);
   if (estavaPreto) {
@@ -169,14 +144,11 @@ void loop() {
   bool direitaPreto  = SENSOR1_E_O_DA_DIREITA ? s1Preto : s2Preto;
   bool esquerdaPreto = SENSOR1_E_O_DA_DIREITA ? s2Preto : s1Preto;
 
-  // LED aceso = algum sensor vendo preto (debug visual sem PC)
   digitalWrite(LED_BUILTIN, (s1Preto || s2Preto) ? HIGH : LOW);
 
-  // Última ação: 0 = frente, 1 = direita, 2 = esquerda.
-  // Dois sensores no preto = repete a última ação: numa curva fechada a
-  // linha entra em diagonal sob os dois sensores (não é cruzamento — tem
-  // que continuar virando). Num cruzamento real estava indo reto e segue reto.
-  static int ultimaAcao = 0;
+  // Dois pretos = repete a última ação (curva fechada entra em diagonal
+  // sob os dois sensores; cruzamento real segue reto)
+  static int ultimaAcao = 0; // 0 = frente, 1 = direita, 2 = esquerda
 
   const char *acao;
   if (direitaPreto && !esquerdaPreto) {
