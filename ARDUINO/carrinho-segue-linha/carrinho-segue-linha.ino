@@ -23,8 +23,8 @@ const int sensor1AO = A0;
 const int sensor2AO = A1;
 
 // ---------------- Ajustes principais ----------------
-const int velocidadeReta  = 80;  // reta: baixo o bastante p/ dar tempo de reagir
-const int velocidadeCurva = 200;  // pivô precisa de PWM alto, senão o motor trava
+const int velocidadeReta  = 60;  // reta: baixo o bastante p/ dar tempo de reagir
+const int velocidadeCurva = 150;  // pivô precisa de PWM alto, senão o motor trava
 const int velocidadeBusca = 170;  // girando procurando a linha perdida
 
 // Sensor 1 fica do lado DIREITO do carrinho? (true = sim)
@@ -41,15 +41,22 @@ const bool pretoQuandoDOBaixo = false; // false: DO HIGH = preto (padrão LM393)
 const int  limiteAnalogico    = 80;    // branco lê ~11-58, preto sobe acima de 100
 const bool pretoQuandoAOMaior = true;  // analógico maior = preto
 
-// Depois que o sensor limpa, mantém a curva por este tempo (ponte p/ curva fechada).
-// Valor alto demais causa ziguezague. 0 desliga.
-const unsigned long tempoManterCurvaMs = 60;
+// Correção leve: depois que o sensor limpa, completa a curva por este tempo.
+const unsigned long tempoManterCurvaMs = 50;
+
+// Curva fechada: se o sensor ficou no preto por mais que isto, não é correção
+// leve — é quina/curva forte. Aí o carrinho continua girando ATÉ reencontrar
+// a linha (sem limite de tempo), em vez de desistir e seguir reto.
+const unsigned long limiarCurvaFechadaMs = 50;
 
 const unsigned long intervaloSerialMs = 200;
 // -----------------------------------------------------
 
 bool ultimaCurvaDireita = true;
 unsigned long manterCurvaAte = 0;
+unsigned long inicioPreto = 0;   // quando o sensor entrou no preto
+bool emCurva = false;            // sensor de um lado está no preto agora
+bool buscandoLinha = false;      // curva fechada: girar até reencontrar a linha
 
 // Os dois motores usam slow decay no sentido "frente" (mais torque em PWM baixo).
 // Se o motor 2 girar ao contrário, troque os dois fios dele na ponte H
@@ -129,24 +136,41 @@ void loop() {
   const char *acao;
 
   if (direitaPreto && !esquerdaPreto) {
-    // Linha escapou para a direita: pivô forte para a direita até o sensor limpar
+    // Linha escapou para a direita: pivô para a direita até o sensor limpar
     pivoDireita(velocidadeCurva);
     ultimaCurvaDireita = true;
-    manterCurvaAte = agora + tempoManterCurvaMs;
+    buscandoLinha = false;
+    if (!emCurva) { emCurva = true; inicioPreto = agora; }
     acao = "CURVA DIREITA";
   } else if (esquerdaPreto && !direitaPreto) {
     pivoEsquerda(velocidadeCurva);
     ultimaCurvaDireita = false;
-    manterCurvaAte = agora + tempoManterCurvaMs;
+    buscandoLinha = false;
+    if (!emCurva) { emCurva = true; inicioPreto = agora; }
     acao = "CURVA ESQUERDA";
   } else if (esquerdaPreto && direitaPreto) {
     // Cruzamento ou faixa larga: segue reto devagar
     frente(velocidadeReta);
+    emCurva = false;
+    buscandoLinha = false;
     acao = "CRUZAMENTO";
   } else {
     // Os dois no branco
-    if (agora < manterCurvaAte) {
-      // Acabou de sair de uma curva: completa o movimento por alguns ms
+    if (emCurva) {
+      // Sensor acabou de limpar: decide pelo tempo que ficou no preto
+      emCurva = false;
+      if (agora - inicioPreto >= limiarCurvaFechadaMs) {
+        buscandoLinha = true;            // curva fechada: gira até achar a linha
+      } else {
+        manterCurvaAte = agora + tempoManterCurvaMs; // correção leve: ponte curta
+      }
+    }
+
+    if (buscandoLinha) {
+      if (ultimaCurvaDireita) pivoDireita(velocidadeBusca);
+      else                    pivoEsquerda(velocidadeBusca);
+      acao = "BUSCANDO LINHA";
+    } else if (agora < manterCurvaAte) {
       if (ultimaCurvaDireita) pivoDireita(velocidadeCurva);
       else                    pivoEsquerda(velocidadeCurva);
       acao = "COMPLETANDO CURVA";
