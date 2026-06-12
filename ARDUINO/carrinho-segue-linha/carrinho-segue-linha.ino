@@ -25,7 +25,6 @@ const int sensor2AO = A1;
 // ---------------- Ajustes principais ----------------
 const int velocidadeReta  = 60;  // reta: baixo o bastante p/ dar tempo de reagir
 const int velocidadeCurva = 150;  // pivô precisa de PWM alto, senão o motor trava
-const int velocidadeBusca = 170;  // girando procurando a linha perdida
 
 // Sensor 1 fica do lado DIREITO do carrinho? (true = sim)
 // Sensor da direita vê preto -> linha fugiu p/ direita -> virar p/ direita.
@@ -35,34 +34,29 @@ const bool SENSOR1_E_O_DA_DIREITA = false;
 const bool MOTOR1_INVERTIDO = false;
 const bool MOTOR2_INVERTIDO = true;
 
-// Leitura do sensor
-const bool usarLeituraDigital = false; // DO deste módulo nunca dispara (trimpot); usar AO
-const bool pretoQuandoDOBaixo = false; // false: DO HIGH = preto (padrão LM393)
-const int  limiteAnalogico    = 80;    // branco lê ~11-58, preto sobe acima de 100
-const bool pretoQuandoAOMaior = true;  // analógico maior = preto
+// Compensação de força por motor, em % (100 = sem ajuste).
+// Motor 2 sai mais fraco (inversão usa fast decay + variação entre motores).
+const int ganhoMotor1Pct = 100;
+const int ganhoMotor2Pct = 115;
 
-// Correção leve: depois que o sensor limpa, completa a curva por este tempo.
-const unsigned long tempoManterCurvaMs = 50;
-
-// Curva fechada: se o sensor ficou no preto por mais que isto, não é correção
-// leve — é quina/curva forte. Aí o carrinho continua girando ATÉ reencontrar
-// a linha (sem limite de tempo), em vez de desistir e seguir reto.
-const unsigned long limiarCurvaFechadaMs = 50;
+// Leitura do sensor (analógica; AO maior = preto)
+// Limite por sensor: S1 (D6/A0) tem sinal mais fraco/lento — limite mais baixo
+// para disparar mais cedo. Branco: S1 lê ~11-58, S2 lê ~11-24.
+const int limitePretoS1 = 70;
+const int limitePretoS2 = 50;
+// Histerese: depois de entrar no preto, só volta a branco abaixo de
+// (limite - histerese). Evita tremer na transição.
+const int histerese = 20;
 
 const unsigned long intervaloSerialMs = 200;
 // -----------------------------------------------------
-
-bool ultimaCurvaDireita = true;
-unsigned long manterCurvaAte = 0;
-unsigned long inicioPreto = 0;   // quando o sensor entrou no preto
-bool emCurva = false;            // sensor de um lado está no preto agora
-bool buscandoLinha = false;      // curva fechada: girar até reencontrar a linha
 
 // Os dois motores usam slow decay no sentido "frente" (mais torque em PWM baixo).
 // Se o motor 2 girar ao contrário, troque os dois fios dele na ponte H
 // (não dá para inverter por software mantendo o mesmo modo de PWM).
 void motor1(int velocidade) {
   if (MOTOR1_INVERTIDO) velocidade = -velocidade;
+  velocidade = (int)((long)velocidade * ganhoMotor1Pct / 100);
   velocidade = constrain(velocidade, -255, 255);
   if (velocidade > 0) {
     digitalWrite(AIA, HIGH);
@@ -78,6 +72,7 @@ void motor1(int velocidade) {
 
 void motor2(int velocidade) {
   if (MOTOR2_INVERTIDO) velocidade = -velocidade;
+  velocidade = (int)((long)velocidade * ganhoMotor2Pct / 100);
   velocidade = constrain(velocidade, -255, 255);
   if (velocidade > 0) {
     digitalWrite(BIA, HIGH);
@@ -102,13 +97,15 @@ void pivoDireita(int v)   { rodas(v, -v); }   // esquerda p/ frente, direita p/ 
 void pivoEsquerda(int v)  { rodas(-v, v); }
 void parar()              { rodas(0, 0); }
 
-bool lerPreto(int pinoDO, int pinoAO) {
-  if (usarLeituraDigital) {
-    int d = digitalRead(pinoDO);
-    return pretoQuandoDOBaixo ? (d == LOW) : (d == HIGH);
-  }
+// Leitura com histerese: dispara acima do limite, solta abaixo de limite-histerese
+bool lerPreto(int pinoAO, int limite, bool &estavaPreto) {
   int a = analogRead(pinoAO);
-  return pretoQuandoAOMaior ? (a > limiteAnalogico) : (a < limiteAnalogico);
+  if (estavaPreto) {
+    if (a < limite - histerese) estavaPreto = false;
+  } else {
+    if (a > limite) estavaPreto = true;
+  }
+  return estavaPreto;
 }
 
 void setup() {
@@ -126,8 +123,10 @@ void setup() {
 }
 
 void loop() {
-  bool s1Preto = lerPreto(sensor1DO, sensor1AO);
-  bool s2Preto = lerPreto(sensor2DO, sensor2AO);
+  static bool s1Estado = false;
+  static bool s2Estado = false;
+  bool s1Preto = lerPreto(sensor1AO, limitePretoS1, s1Estado);
+  bool s2Preto = lerPreto(sensor2AO, limitePretoS2, s2Estado);
 
   bool direitaPreto  = SENSOR1_E_O_DA_DIREITA ? s1Preto : s2Preto;
   bool esquerdaPreto = SENSOR1_E_O_DA_DIREITA ? s2Preto : s1Preto;
@@ -138,60 +137,27 @@ void loop() {
   if (direitaPreto && !esquerdaPreto) {
     // Linha escapou para a direita: pivô para a direita até o sensor limpar
     pivoDireita(velocidadeCurva);
-    ultimaCurvaDireita = true;
-    buscandoLinha = false;
-    if (!emCurva) { emCurva = true; inicioPreto = agora; }
     acao = "CURVA DIREITA";
   } else if (esquerdaPreto && !direitaPreto) {
     pivoEsquerda(velocidadeCurva);
-    ultimaCurvaDireita = false;
-    buscandoLinha = false;
-    if (!emCurva) { emCurva = true; inicioPreto = agora; }
     acao = "CURVA ESQUERDA";
   } else if (esquerdaPreto && direitaPreto) {
     // Cruzamento ou faixa larga: segue reto devagar
     frente(velocidadeReta);
-    emCurva = false;
-    buscandoLinha = false;
     acao = "CRUZAMENTO";
   } else {
-    // Os dois no branco
-    if (emCurva) {
-      // Sensor acabou de limpar: decide pelo tempo que ficou no preto
-      emCurva = false;
-      if (agora - inicioPreto >= limiarCurvaFechadaMs) {
-        buscandoLinha = true;            // curva fechada: gira até achar a linha
-      } else {
-        manterCurvaAte = agora + tempoManterCurvaMs; // correção leve: ponte curta
-      }
-    }
-
-    if (buscandoLinha) {
-      if (ultimaCurvaDireita) pivoDireita(velocidadeBusca);
-      else                    pivoEsquerda(velocidadeBusca);
-      acao = "BUSCANDO LINHA";
-    } else if (agora < manterCurvaAte) {
-      if (ultimaCurvaDireita) pivoDireita(velocidadeCurva);
-      else                    pivoEsquerda(velocidadeCurva);
-      acao = "COMPLETANDO CURVA";
-    } else {
-      frente(velocidadeReta);
-      acao = "FRENTE";
-    }
+    frente(velocidadeReta);
+    acao = "FRENTE";
   }
 
   static unsigned long ultimaImpressao = 0;
   if (agora - ultimaImpressao >= intervaloSerialMs) {
     ultimaImpressao = agora;
-    Serial.print("S1(DO=");
-    Serial.print(digitalRead(sensor1DO));
-    Serial.print(",AO=");
+    Serial.print("S1(AO=");
     Serial.print(analogRead(sensor1AO));
     Serial.print(")=");
     Serial.print(s1Preto ? "PRETO " : "BRANCO");
-    Serial.print(" | S2(DO=");
-    Serial.print(digitalRead(sensor2DO));
-    Serial.print(",AO=");
+    Serial.print(" | S2(AO=");
     Serial.print(analogRead(sensor2AO));
     Serial.print(")=");
     Serial.print(s2Preto ? "PRETO " : "BRANCO");
