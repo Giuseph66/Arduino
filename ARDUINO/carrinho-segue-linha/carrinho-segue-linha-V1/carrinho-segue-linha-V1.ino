@@ -134,19 +134,36 @@ void loop() {
   unsigned long agora = millis();
   const char *acao;
 
+  // Última ação tomada: 0 = frente, 1 = virando direita, 2 = virando esquerda.
+  // Usada quando os DOIS sensores veem preto: numa curva fechada o carrinho
+  // volta pra linha em diagonal e ela fica sob os dois sensores ao mesmo
+  // tempo — não é cruzamento, é continuação da curva. Regra: dois pretos =
+  // repete o que estava fazendo (reto num cruzamento real, girando na curva).
+  static int ultimaAcao = 0;
+
   if (direitaPreto && !esquerdaPreto) {
     // Linha escapou para a direita: pivô para a direita até o sensor limpar
     pivoDireita(velocidadeCurva);
+    ultimaAcao = 1;
     acao = "CURVA DIREITA";
   } else if (esquerdaPreto && !direitaPreto) {
     pivoEsquerda(velocidadeCurva);
+    ultimaAcao = 2;
     acao = "CURVA ESQUERDA";
   } else if (esquerdaPreto && direitaPreto) {
-    // Cruzamento ou faixa larga: segue reto devagar
-    frente(velocidadeReta);
-    acao = "CRUZAMENTO";
+    if (ultimaAcao == 1) {
+      pivoDireita(velocidadeCurva);
+      acao = "CONTINUA DIREITA";
+    } else if (ultimaAcao == 2) {
+      pivoEsquerda(velocidadeCurva);
+      acao = "CONTINUA ESQUERDA";
+    } else {
+      frente(velocidadeReta);
+      acao = "CRUZAMENTO";
+    }
   } else {
     frente(velocidadeReta);
+    ultimaAcao = 0;
     acao = "FRENTE";
   }
 
