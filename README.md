@@ -15,6 +15,9 @@ Projetos focados em microcontroladores padrão (Uno, Nano, Mega) e sensores bás
 |:---:|---|---|---|
 | [**BMO**](./ARDUINO/bmo) | Animação de Rosto | Cria uma interface visual estilo "BMO" (Adventure Time). | Use um display OLED e carregue o sketch `bmo.ino`. |
 | [**Bracudo**](./ARDUINO/bracudo-controlinho) | Controle de Braço Robótico | Controla servos para movimentação de um braço robótico. | Conecte os servos nos pinos PWM definidos no código. |
+| [**Segue Linha V1**](./ARDUINO/carrinho-segue-linha/carrinho-segue-linha-V1) | Carrinho Segue Linha | Robô que segue uma linha preta usando 2 sensores IR analógicos e ponte H L9110. | Nano + 2 motores TT. Limiares fixos no topo do código; ajuste pelo Serial Monitor (115200). |
+| [**Segue Linha V2**](./ARDUINO/carrinho-segue-linha/carrinho-segue-linha-v2) | Carrinho Segue Linha (Autocalibrável) | Mesma base da V1 com calibração automática dos sensores no boot. | Ligue sobre a pista; com o LED piscando (5s), deslize os sensores sobre preto e branco. LED fixo = pronto. |
+| [**Obstáculo IR**](./ARDUINO/obstaculo_infra) | Detector de Obstáculos | Detecta obstáculos à frente usando sensor infravermelho. | Conecte o módulo IR e acompanhe a leitura pelo Serial Monitor. |
 | [**GPS**](./ARDUINO/gps) | Leitor de Coordenadas | Obtém latitude/longitude em tempo real via satélite. | Requer módulo GPS (ex: NEO-6M). Use em ambiente aberto. |
 | [**EMG Arduino**](./ARDUINO/EMG) | Sensor Muscular | Lê sinais elétricos dos músculos para controle. | Requer sensor EMG. Ideal para próteses ou biofeedback. |
 | [**RF Transmissor**](./ARDUINO/transmissoooo_433) | Transmissor 433MHz | Envia sinais sem fio via rádio frequência. | Use em conjunto com o código de receptor. |
