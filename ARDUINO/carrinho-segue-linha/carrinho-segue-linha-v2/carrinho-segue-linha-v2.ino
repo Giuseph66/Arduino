@@ -1,9 +1,5 @@
 // Carrinho segue-linha V2 — calibração automática no boot
 // Motor 1: AIA=2, AIB=3 | Motor 2: BIA=4, BIB=5 | Sensores: AO em A0/A1
-//
-// USO: ligue com os sensores sobre a pista. LED piscando (5s) = deslize o
-// carrinho passando os sensores sobre preto e branco. LED fixo 1s = pronto.
-// Serial 115200 mostra limiares e leituras.
 
 #define AIA 2
 #define AIB 3
@@ -13,7 +9,6 @@
 const int sensor1AO = A0;
 const int sensor2AO = A1;
 
-// ---------------- Ajustes principais ----------------
 const int velocidadeReta  = 60;
 const int velocidadeCurva = 150;
 
@@ -28,7 +23,6 @@ const int ganhoMotor2Pct = 115;
 
 const unsigned long tempoCalibracaoMs = 5000;
 const unsigned long intervaloSerialMs = 200;
-// -----------------------------------------------------
 
 int limiarS1, limiarS2;
 int histS1, histS2;
@@ -146,8 +140,6 @@ void loop() {
 
   digitalWrite(LED_BUILTIN, (s1Preto || s2Preto) ? HIGH : LOW);
 
-  // Dois pretos = repete a última ação (curva fechada entra em diagonal
-  // sob os dois sensores; cruzamento real segue reto)
   static int ultimaAcao = 0; // 0 = frente, 1 = direita, 2 = esquerda
 
   const char *acao;
