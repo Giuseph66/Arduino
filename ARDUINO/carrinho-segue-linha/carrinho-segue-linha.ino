@@ -1,3 +1,17 @@
+// Carrinho segue-linha — 2 sensores IR + ponte H (L9110/similar) + Arduino Nano
+//
+// PORTAS FIXAS (não alterar):
+//   Motor 1: AIA=2 (direção), AIB=3 (PWM)
+//   Motor 2: BIA=4 (direção), BIB=5 (PWM)
+//   Sensores: DO 6/7, AO A0/A1
+//
+// COMO AJUSTAR:
+//   1. Abra o Serial Monitor a 115200 e passe os sensores sobre a linha.
+//      Se PRETO/BRANCO aparecer invertido, troque pretoQuandoDOBaixo.
+//   2. Se o carrinho virar para o lado errado, troque SENSOR1_E_O_DA_DIREITA.
+//   3. Se ainda passar reto nas curvas, aumente velocidadeCurva (até 255)
+//      ou diminua velocidadeReta.
+
 #define AIA 2
 #define AIB 3
 #define BIA 4
@@ -5,27 +19,44 @@
 
 const int sensor1DO = 6;
 const int sensor2DO = 7;
-
 const int sensor1AO = A0;
 const int sensor2AO = A1;
 
-const int intervaloLeituraMs = 1;
-const unsigned long intervaloSerialMs = 100;
-const int velocidadeReta = 100;
-const int velocidadeCurva = 80;
+// ---------------- Ajustes principais ----------------
+const int velocidadeReta  = 80;  // reta: baixo o bastante p/ dar tempo de reagir
+const int velocidadeCurva = 200;  // pivô precisa de PWM alto, senão o motor trava
+const int velocidadeBusca = 170;  // girando procurando a linha perdida
 
-const int limiteSensor1 = 100;
-const int limiteSensor2 = 100;
-const bool pretoQuandoAOMaior = true;
-const bool usarLeituraDigital = true;
-const bool pretoQuandoDOBaixo = false;
-const unsigned long tempoManterCurvaMs = 250;
+// Sensor 1 fica do lado DIREITO do carrinho? (true = sim)
+// Sensor da direita vê preto -> linha fugiu p/ direita -> virar p/ direita.
+const bool SENSOR1_E_O_DA_DIREITA = false;
+
+// Se uma roda girar ao contrário no "frente", inverta o motor correspondente aqui.
+const bool MOTOR1_INVERTIDO = false;
+const bool MOTOR2_INVERTIDO = true;
+
+// Leitura do sensor
+const bool usarLeituraDigital = false; // DO deste módulo nunca dispara (trimpot); usar AO
+const bool pretoQuandoDOBaixo = false; // false: DO HIGH = preto (padrão LM393)
+const int  limiteAnalogico    = 80;    // branco lê ~11-58, preto sobe acima de 100
+const bool pretoQuandoAOMaior = true;  // analógico maior = preto
+
+// Depois que o sensor limpa, mantém a curva por este tempo (ponte p/ curva fechada).
+// Valor alto demais causa ziguezague. 0 desliga.
+const unsigned long tempoManterCurvaMs = 60;
+
+const unsigned long intervaloSerialMs = 200;
+// -----------------------------------------------------
+
 bool ultimaCurvaDireita = true;
 unsigned long manterCurvaAte = 0;
 
+// Os dois motores usam slow decay no sentido "frente" (mais torque em PWM baixo).
+// Se o motor 2 girar ao contrário, troque os dois fios dele na ponte H
+// (não dá para inverter por software mantendo o mesmo modo de PWM).
 void motor1(int velocidade) {
+  if (MOTOR1_INVERTIDO) velocidade = -velocidade;
   velocidade = constrain(velocidade, -255, 255);
-
   if (velocidade > 0) {
     digitalWrite(AIA, HIGH);
     analogWrite(AIB, 255 - velocidade);
@@ -39,18 +70,38 @@ void motor1(int velocidade) {
 }
 
 void motor2(int velocidade) {
+  if (MOTOR2_INVERTIDO) velocidade = -velocidade;
   velocidade = constrain(velocidade, -255, 255);
-
   if (velocidade > 0) {
-    digitalWrite(BIA, LOW);
-    analogWrite(BIB, velocidade);
-  } else if (velocidade < 0) {
     digitalWrite(BIA, HIGH);
-    analogWrite(BIB, 255 + velocidade);
+    analogWrite(BIB, 255 - velocidade);
+  } else if (velocidade < 0) {
+    digitalWrite(BIA, LOW);
+    analogWrite(BIB, -velocidade);
   } else {
     digitalWrite(BIA, LOW);
     analogWrite(BIB, 0);
   }
+}
+
+// motorDireito/motorEsquerdo em função do lado físico do carrinho
+void rodas(int esquerda, int direita) {
+  motor1(direita);
+  motor2(esquerda);
+}
+
+void frente(int v)        { rodas(v, v); }
+void pivoDireita(int v)   { rodas(v, -v); }   // esquerda p/ frente, direita p/ trás
+void pivoEsquerda(int v)  { rodas(-v, v); }
+void parar()              { rodas(0, 0); }
+
+bool lerPreto(int pinoDO, int pinoAO) {
+  if (usarLeituraDigital) {
+    int d = digitalRead(pinoDO);
+    return pretoQuandoDOBaixo ? (d == LOW) : (d == HIGH);
+  }
+  int a = analogRead(pinoAO);
+  return pretoQuandoAOMaior ? (a > limiteAnalogico) : (a < limiteAnalogico);
 }
 
 void setup() {
@@ -63,113 +114,65 @@ void setup() {
 
   pinMode(sensor1DO, INPUT);
   pinMode(sensor2DO, INPUT);
-}
 
-void frente() {
-  motor1(velocidadeReta);
-  motor2(velocidadeReta);
-}
-
-void parar() {
-  motor1(0);
-  motor2(0);
-}
-
-void virarEsquerda() {
-  motor1(-velocidadeCurva);
-  motor2(velocidadeCurva);
-}
-
-void virarDireita() {
-  motor1(velocidadeCurva);
-  motor2(-velocidadeCurva);
+  parar();
 }
 
 void loop() {
-  int s1Digital = digitalRead(sensor1DO);
-  int s2Digital = digitalRead(sensor2DO);
+  bool s1Preto = lerPreto(sensor1DO, sensor1AO);
+  bool s2Preto = lerPreto(sensor2DO, sensor2AO);
 
-  int s1Analogico = analogRead(sensor1AO);
-  int s2Analogico = analogRead(sensor2AO);
+  bool direitaPreto  = SENSOR1_E_O_DA_DIREITA ? s1Preto : s2Preto;
+  bool esquerdaPreto = SENSOR1_E_O_DA_DIREITA ? s2Preto : s1Preto;
 
-  bool s1Preto = pretoQuandoAOMaior ? s1Analogico > limiteSensor1 : s1Analogico < limiteSensor1;
-  bool s2Preto = pretoQuandoAOMaior ? s2Analogico > limiteSensor2 : s2Analogico < limiteSensor2;
-  if (usarLeituraDigital) {
-    s1Preto = pretoQuandoDOBaixo ? s1Digital == LOW : s1Digital == HIGH;
-    s2Preto = pretoQuandoDOBaixo ? s2Digital == LOW : s2Digital == HIGH;
-  }
-
-  bool motor1Ligado = false;
-  bool motor2Ligado = false;
-  const char *acao = "PARAR";
   unsigned long agora = millis();
+  const char *acao;
 
-  if (s1Preto && !s2Preto) {
-    virarDireita();
+  if (direitaPreto && !esquerdaPreto) {
+    // Linha escapou para a direita: pivô forte para a direita até o sensor limpar
+    pivoDireita(velocidadeCurva);
     ultimaCurvaDireita = true;
     manterCurvaAte = agora + tempoManterCurvaMs;
-    motor1Ligado = true;
-    motor2Ligado = true;
-    acao = "VIRAR DIREITA";
-  } else if (!s1Preto && s2Preto) {
-    virarEsquerda();
+    acao = "CURVA DIREITA";
+  } else if (esquerdaPreto && !direitaPreto) {
+    pivoEsquerda(velocidadeCurva);
     ultimaCurvaDireita = false;
     manterCurvaAte = agora + tempoManterCurvaMs;
-    motor1Ligado = true;
-    motor2Ligado = true;
-    acao = "VIRAR ESQUERDA";
-  } else if (!s1Preto && !s2Preto) {
+    acao = "CURVA ESQUERDA";
+  } else if (esquerdaPreto && direitaPreto) {
+    // Cruzamento ou faixa larga: segue reto devagar
+    frente(velocidadeReta);
+    acao = "CRUZAMENTO";
+  } else {
+    // Os dois no branco
     if (agora < manterCurvaAte) {
-      if (ultimaCurvaDireita) {
-        virarDireita();
-        acao = "MANTER DIREITA";
-      } else {
-        virarEsquerda();
-        acao = "MANTER ESQUERDA";
-      }
+      // Acabou de sair de uma curva: completa o movimento por alguns ms
+      if (ultimaCurvaDireita) pivoDireita(velocidadeCurva);
+      else                    pivoEsquerda(velocidadeCurva);
+      acao = "COMPLETANDO CURVA";
     } else {
-      frente();
+      frente(velocidadeReta);
       acao = "FRENTE";
     }
-    motor1Ligado = true;
-    motor2Ligado = true;
-  } else {
-    if (ultimaCurvaDireita) {
-      virarDireita();
-      acao = "BUSCAR DIREITA";
-    } else {
-      virarEsquerda();
-      acao = "BUSCAR ESQUERDA";
-    }
-    motor1Ligado = true;
-    motor2Ligado = true;
   }
 
-  static unsigned long ultimaImpressaoSerial = 0;
-  if (agora - ultimaImpressaoSerial >= intervaloSerialMs) {
-    ultimaImpressaoSerial = agora;
-
-    Serial.print("Sensor 1 DO: ");
-    Serial.print(s1Digital);
-    Serial.print(" | AO: ");
-    Serial.print(s1Analogico);
-    Serial.print(" | COR: ");
-    Serial.print(s1Preto ? "PRETO" : "BRANCO");
-
-    Serial.print(" || Sensor 2 DO: ");
-    Serial.print(s2Digital);
-    Serial.print(" | AO: ");
-    Serial.print(s2Analogico);
-    Serial.print(" | COR: ");
-    Serial.print(s2Preto ? "PRETO" : "BRANCO");
-
-    Serial.print(" || Motor 1/Servo 1: ");
-    Serial.print(motor1Ligado ? "GIRANDO" : "PARADO");
-    Serial.print(" | Motor 2/Servo 2: ");
-    Serial.print(motor2Ligado ? "GIRANDO" : "PARADO");
-    Serial.print(" || ACAO: ");
+  static unsigned long ultimaImpressao = 0;
+  if (agora - ultimaImpressao >= intervaloSerialMs) {
+    ultimaImpressao = agora;
+    Serial.print("S1(DO=");
+    Serial.print(digitalRead(sensor1DO));
+    Serial.print(",AO=");
+    Serial.print(analogRead(sensor1AO));
+    Serial.print(")=");
+    Serial.print(s1Preto ? "PRETO " : "BRANCO");
+    Serial.print(" | S2(DO=");
+    Serial.print(digitalRead(sensor2DO));
+    Serial.print(",AO=");
+    Serial.print(analogRead(sensor2AO));
+    Serial.print(")=");
+    Serial.print(s2Preto ? "PRETO " : "BRANCO");
+    Serial.print(" | ");
     Serial.println(acao);
   }
-
-  delay(intervaloLeituraMs);
+  // Sem delay(): loop roda o mais rápido possível, reação imediata do sensor
 }
