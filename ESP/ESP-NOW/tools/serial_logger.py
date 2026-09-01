@@ -197,6 +197,10 @@ def main() -> int:
         print("Cannot open {}: {}".format(port, error), file=sys.stderr)
         return 2
 
+    # Discard bytes accumulated while Arduino Serial Monitor/another process had the port.
+    # This keeps a new session from starting with stale, partial structured lines.
+    device.reset_input_buffer()
+
     print("Logging {} at {} baud".format(port, args.baud))
     print("Session: {}".format(session_dir))
     print("Press Ctrl+C to finish and create summary.txt.")

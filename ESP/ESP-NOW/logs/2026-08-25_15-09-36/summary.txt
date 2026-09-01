@@ -1,0 +1,51 @@
+ESP-NOW RANGE TEST
+==================
+
+Started: 2026-08-25 15:09:36
+Ended: 2026-08-25 15:22:27
+Session duration: 00:12:50
+
+PROBE
+-----
+
+Packets RX: 1581
+Estimated lost: 9
+Duplicates: 0
+Out of order: 0
+
+PDR:
+99.43%
+
+RSSI:
+minimum: -12 dBm
+maximum: -8 dBm
+average: -10.3 dBm
+
+RTT:
+minimum: 26 ms
+maximum: 77 ms
+average: 28.5 ms
+p95: 37 ms
+
+Longest communication outage:
+0.0 s
+
+GATE
+----
+
+Packets RX: 3271
+Estimated lost: 3269
+Duplicates: 1
+Out of order: 153
+
+PDR:
+50.02%
+
+RSSI:
+minimum: -84 dBm
+maximum: -77 dBm
+average: -79.3 dBm
+
+Longest communication outage:
+0.0 s
+

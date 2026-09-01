@@ -15,7 +15,7 @@
 #define SERIAL_BAUD 115200
 
 #define PROTOCOL_MAGIC 0x4E57  // "NW"
-#define PROTOCOL_VERSION 1
+#define PROTOCOL_VERSION 2
 #define RSSI_NOT_AVAILABLE 127
 #define PACKET_FLAG_NEW_RTT 0x01
 
@@ -40,23 +40,29 @@ enum PacketType : uint8_t {
   PONG = 4,
   HEARTBEAT = 5,
   ACK = 6,
+  GATE_BEACON = 7,
+  RELAY_PING = 8,
+  RELAY_PONG = 9,
 };
 
-// Fixed 24-byte binary protocol. replyToSequence correlates PONG/ACK safely.
-// metricMs carries a node's most recently measured RTT in its next request.
+// Fixed 32-byte protocol. RELAY_* keeps origin sequence across two hops.
 struct __attribute__((packed)) EspNowPacket {
   uint16_t magic;
   uint8_t version;
   uint8_t type;
   uint8_t senderId;
+  uint8_t originId;
   uint8_t flags;
-  uint16_t reserved;
+  uint8_t hopCount;
   uint32_t sequence;
   uint32_t timestampMs;
   uint32_t replyToSequence;
+  uint32_t originSequence;
   uint32_t metricMs;
+  int8_t relayRssi;
+  uint8_t reserved[3];
 };
-static_assert(sizeof(EspNowPacket) == 24, "Unexpected packet size");
+static_assert(sizeof(EspNowPacket) == 32, "Unexpected packet size");
 
 struct RxEvent {
   uint8_t mac[6];
@@ -112,12 +118,15 @@ const char *packetTypeName(uint8_t type) {
     case PONG: return "PONG";
     case HEARTBEAT: return "HEARTBEAT";
     case ACK: return "ACK";
+    case GATE_BEACON: return "GATE_BEACON";
+    case RELAY_PING: return "RELAY_PING";
+    case RELAY_PONG: return "RELAY_PONG";
     default: return "UNKNOWN";
   }
 }
 
 bool isKnownPacketType(uint8_t type) {
-  return type >= HELLO && type <= ACK;
+  return type >= HELLO && type <= RELAY_PONG;
 }
 
 void macToText(const uint8_t *mac, char *out, size_t outSize) {
@@ -140,12 +149,6 @@ bool hasElapsed(uint32_t now, uint32_t since, uint32_t period) {
 double pdr(const NodeStats &node) {
   const double total = (double)node.received + (double)node.estimatedLost;
   return total == 0.0 ? 0.0 : (100.0 * (double)node.received / total);
-}
-
-NodeStats *nodeForId(uint8_t id) {
-  if (id == DEVICE_PROBE) return &probe;
-  if (id == DEVICE_GATE) return &gate;
-  return nullptr;
 }
 
 bool ensurePeer(const uint8_t *mac) {
@@ -174,26 +177,32 @@ EspNowPacket makePacket(PacketType type, uint32_t replyToSequence = 0,
   packet.version = PROTOCOL_VERSION;
   packet.type = type;
   packet.senderId = DEVICE_ID;
+  packet.originId = DEVICE_ID;
   packet.flags = flags;
+  packet.hopCount = 0;
   packet.sequence = nextSequence++;
   packet.timestampMs = millis();
   packet.replyToSequence = replyToSequence;
   packet.metricMs = metricMs;
+  packet.relayRssi = RSSI_NOT_AVAILABLE;
   return packet;
+}
+
+bool sendRawPacket(const uint8_t *mac, const char *nodeName, const EspNowPacket &packet) {
+  esp_err_t result = esp_now_send(mac, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
+  char macText[18];
+  macToText(mac, macText, sizeof(macText));
+  Serial.printf("TX|ms=%lu|node=%s|mac=%s|type=%s|seq=%lu|reply_to=%lu|status=%s\n",
+                (unsigned long)millis(), nodeName, macText, packetTypeName(packet.type),
+                (unsigned long)packet.sequence, (unsigned long)packet.replyToSequence,
+                result == ESP_OK ? "QUEUED" : "ERROR");
+  return result == ESP_OK;
 }
 
 bool sendPacket(const uint8_t *mac, const char *nodeName, PacketType type,
                 uint32_t replyToSequence = 0, uint32_t metricMs = UINT32_MAX,
                 uint8_t flags = 0) {
-  EspNowPacket packet = makePacket(type, replyToSequence, metricMs, flags);
-  esp_err_t result = esp_now_send(mac, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
-  char macText[18];
-  macToText(mac, macText, sizeof(macText));
-  Serial.printf("TX|ms=%lu|node=%s|mac=%s|type=%s|seq=%lu|reply_to=%lu|status=%s\n",
-                (unsigned long)millis(), nodeName, macText, packetTypeName(type),
-                (unsigned long)packet.sequence, (unsigned long)replyToSequence,
-                result == ESP_OK ? "QUEUED" : "ERROR");
-  return result == ESP_OK;
+  return sendRawPacket(mac, nodeName, makePacket(type, replyToSequence, metricMs, flags));
 }
 
 void enqueueRx(const uint8_t *mac, const uint8_t *data, int dataLength, int rssi) {
@@ -298,12 +307,13 @@ void updateReportedRtt(NodeStats &node, uint32_t rtt) {
   ++node.rttSamples;
 }
 
-void updateNodeReception(NodeStats &node, const EspNowPacket &packet, int rssi) {
+void updateNodeReception(NodeStats &node, uint32_t sequence, uint8_t flags,
+                         uint32_t metricMs, int rssi, bool allowConfirmation) {
   const bool confirmedThisPacket =
-      (packet.flags & PACKET_FLAG_NEW_RTT) && packet.metricMs != UINT32_MAX;
-  updateSequence(node, packet.sequence);
+      allowConfirmation && (flags & PACKET_FLAG_NEW_RTT) && metricMs != UINT32_MAX;
+  updateSequence(node, sequence);
   updateRssi(node, rssi);
-  if (packet.flags & PACKET_FLAG_NEW_RTT) updateReportedRtt(node, packet.metricMs);
+  if (allowConfirmation && (flags & PACKET_FLAG_NEW_RTT)) updateReportedRtt(node, metricMs);
   node.lastSeenMs = millis();
   // A freshly reported RTT proves this node received the preceding PONG/ACK.
   // Base's ONLINE state is therefore bidirectional application confirmation.
@@ -323,13 +333,32 @@ void logRx(const NodeStats &node, const EspNowPacket &packet, int rssi, const ui
   macToText(mac, macText, sizeof(macText));
   rssiToText(rssi, rssiText, sizeof(rssiText));
   if (!(packet.flags & PACKET_FLAG_NEW_RTT) || packet.metricMs == UINT32_MAX) {
-    Serial.printf("RX|ms=%lu|node=%s|mac=%s|type=%s|seq=%lu|rssi=%s|rtt=N/A\n",
+    Serial.printf("RX|ms=%lu|node=%s|hop=GATE_BASE|mac=%s|type=%s|seq=%lu|rssi=%s|rtt=N/A\n",
                   (unsigned long)millis(), node.name, macText, packetTypeName(packet.type),
                   (unsigned long)packet.sequence, rssiText);
   } else {
-    Serial.printf("RX|ms=%lu|node=%s|mac=%s|type=%s|seq=%lu|rssi=%s|rtt=%lu\n",
+    Serial.printf("RX|ms=%lu|node=%s|hop=GATE_BASE|mac=%s|type=%s|seq=%lu|rssi=%s|rtt=%lu\n",
                   (unsigned long)millis(), node.name, macText, packetTypeName(packet.type),
                   (unsigned long)packet.sequence, rssiText, (unsigned long)packet.metricMs);
+  }
+}
+
+void logRelayedProbe(const EspNowPacket &packet, int baseRssi, const uint8_t *gateMac) {
+  char macText[18];
+  char probeHopRssi[8];
+  char baseHopRssi[8];
+  macToText(gateMac, macText, sizeof(macText));
+  rssiToText(packet.relayRssi, probeHopRssi, sizeof(probeHopRssi));
+  rssiToText(baseRssi, baseHopRssi, sizeof(baseHopRssi));
+  if (!(packet.flags & PACKET_FLAG_NEW_RTT) || packet.metricMs == UINT32_MAX) {
+    Serial.printf("RX|ms=%lu|node=PROBE|hop=END_TO_END|via=GATE|mac=%s|type=RELAY_PING|seq=%lu|hop_seq=%lu|rssi=%s|base_rssi=%s|rtt=N/A\n",
+                  (unsigned long)millis(), macText, (unsigned long)packet.originSequence,
+                  (unsigned long)packet.sequence, probeHopRssi, baseHopRssi);
+  } else {
+    Serial.printf("RX|ms=%lu|node=PROBE|hop=END_TO_END|via=GATE|mac=%s|type=RELAY_PING|seq=%lu|hop_seq=%lu|rssi=%s|base_rssi=%s|rtt=%lu\n",
+                  (unsigned long)millis(), macText, (unsigned long)packet.originSequence,
+                  (unsigned long)packet.sequence, probeHopRssi, baseHopRssi,
+                  (unsigned long)packet.metricMs);
   }
 }
 
@@ -353,36 +382,50 @@ void processRx(const RxEvent &event) {
     return;
   }
 
-  NodeStats *node = nodeForId(packet.senderId);
-  if (node == nullptr) {
-    Serial.printf("DROP|ms=%lu|reason=UNKNOWN_NODE|sender=%u\n",
+  // Relay-only topology: BASE accepts direct frames only from GATE.
+  if (packet.senderId != DEVICE_GATE) {
+    Serial.printf("DROP|ms=%lu|reason=DIRECT_ROUTE_DISABLED|sender=%u\n",
                   (unsigned long)millis(), packet.senderId);
     return;
   }
 
-  rememberNode(*node, event.mac);
+  rememberNode(gate, event.mac);
   if (!ensurePeer(event.mac)) return;
-  updateNodeReception(*node, packet, event.rssi);
-  logRx(*node, packet, event.rssi, event.mac);
+  const bool gateConfirmation = packet.type == HEARTBEAT;
+  updateNodeReception(gate, packet.sequence, packet.flags, packet.metricMs,
+                      event.rssi, gateConfirmation);
+  logRx(gate, packet, event.rssi, event.mac);
 
   if (packet.type == HELLO) {
-    // Direct reply confirms discovery; periodic broadcast remains active too.
-    sendPacket(event.mac, node->name, BASE_BEACON);
-  } else if (packet.type == PING && packet.senderId == DEVICE_PROBE) {
-    sendPacket(event.mac, node->name, PONG, packet.sequence);
-  } else if (packet.type == HEARTBEAT && packet.senderId == DEVICE_GATE) {
-    sendPacket(event.mac, node->name, ACK, packet.sequence);
+    sendPacket(event.mac, "GATE", BASE_BEACON);
+  } else if (packet.type == HEARTBEAT) {
+    sendPacket(event.mac, "GATE", ACK, packet.sequence);
+  } else if (packet.type == RELAY_PING && packet.originId == DEVICE_PROBE) {
+    // `relayRssi` is measured by GATE when it received PROBE's PING.
+    probe.known = true;
+    memcpy(probe.mac, event.mac, sizeof(probe.mac));  // Gateway MAC; status says via=GATE.
+    updateNodeReception(probe, packet.originSequence, packet.flags, packet.metricMs,
+                        packet.relayRssi, true);
+    logRelayedProbe(packet, event.rssi, event.mac);
+
+    EspNowPacket pong = makePacket(RELAY_PONG);
+    pong.originId = DEVICE_PROBE;
+    pong.originSequence = packet.originSequence;
+    pong.hopCount = packet.hopCount + 1;
+    sendRawPacket(event.mac, "GATE", pong);
   }
 }
 
-void printNodeStat(const NodeStats &node, uint32_t now) {
+void printNodeStat(const NodeStats &node, uint32_t now, const char *hop, const char *via = nullptr) {
   char macText[18] = "N/A";
   char rssiText[8];
   if (node.known) macToText(node.mac, macText, sizeof(macText));
   rssiToText(node.rssiCurrent, rssiText, sizeof(rssiText));
   const uint32_t lastSeen = node.known ? (uint32_t)(now - node.lastSeenMs) : 0;
-  Serial.printf("STAT|ms=%lu|node=%s|mac=%s|online=%s|rx=%lu|lost=%lu|dup=%lu|ooo=%lu|pdr=%.2f|rssi=%s|last_seen=%lu",
-                (unsigned long)now, node.name, macText, node.online ? "YES" : "NO",
+  Serial.printf("STAT|ms=%lu|node=%s|hop=%s", (unsigned long)now, node.name, hop);
+  if (via != nullptr) Serial.printf("|via=%s", via);
+  Serial.printf("|mac=%s|online=%s|rx=%lu|lost=%lu|dup=%lu|ooo=%lu|pdr=%.2f|rssi=%s|last_seen=%lu",
+                macText, node.online ? "YES" : "NO",
                 (unsigned long)node.received, (unsigned long)node.estimatedLost,
                 (unsigned long)node.duplicates, (unsigned long)node.outOfOrder,
                 pdr(node), rssiText, (unsigned long)lastSeen);
@@ -403,7 +446,9 @@ void printHumanNode(const NodeStats &node, uint32_t now) {
   }
   char macText[18];
   macToText(node.mac, macText, sizeof(macText));
-  Serial.printf("MAC: %s\nONLINE: %s\n", macText, node.online ? "YES" : "NO");
+  Serial.printf("MAC: %s\n", macText);
+  if (node.id == DEVICE_PROBE) Serial.println("VIA: GATE");
+  Serial.printf("ONLINE: %s\n", node.online ? "YES" : "NO");
   if (node.rssiSamples == 0) {
     Serial.println("RSSI CURRENT: N/A\nRSSI AVG: N/A");
   } else {
@@ -416,8 +461,8 @@ void printHumanNode(const NodeStats &node, uint32_t now) {
 }
 
 void printReport(uint32_t now) {
-  printNodeStat(probe, now);
-  printNodeStat(gate, now);
+  printNodeStat(probe, now, "END_TO_END", "GATE");
+  printNodeStat(gate, now, "GATE_BASE");
   Serial.println("========== ESP-NOW STATUS ==========");
   printHumanNode(probe, now);
   printHumanNode(gate, now);

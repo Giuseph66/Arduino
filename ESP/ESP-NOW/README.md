@@ -31,8 +31,8 @@ BASE USB -> serial_logger.py -> terminal + logs
 | Sketch | Placa atual | Papel |
 |---|---|---|
 | `esp32u_base/esp32u_base.ino` | ESP32U | BASE/concentrador |
-| `esp32_gate/esp32_gate.ino` | ESP32 clássico | GATE fixo |
-| `esp32s3_probe/esp32s3_probe.ino` | ESP32-S3 | PROBE móvel |
+| `esp32_gate/esp32_gate.ino` | ESP32 clássico | GATE fixo/relay |
+| `esp32s3_probe/esp32s3_probe.ino` | ESP32-S3 | PROBE móvel/leaf |
 
 Papel vem de `DEVICE_ID`, não modelo físico. Troca futura de placas não exige
 redesenhar protocolo.
@@ -52,41 +52,50 @@ SERIAL_BAUD      // 115200
 Todos devem permanecer canal 6. Wi-Fi usa STA, `WIFI_PS_NONE` quando API aceita
 para reduzir variação de latência. Potência TX permanece padrão legal/core.
 
-## Descoberta e protocolo
+## Descoberta, relay e protocolo
 
 Inicialmente, cada placa adiciona apenas broadcast `FF:FF:FF:FF:FF:FF`.
 
 ```text
-BASE  -- BASE_BEACON broadcast --> GATE / PROBE
+BASE  -- BASE_BEACON broadcast --> GATE
 GATE  -- HELLO broadcast -------> BASE
-PROBE -- HELLO broadcast -------> BASE
-BASE  -- BASE_BEACON unicast ---> emissor HELLO
+GATE  -- GATE_BEACON broadcast -> PROBE
+PROBE -- HELLO broadcast -------> GATE
 ```
 
-BASE identifica MAC + `DEVICE_ID`, cria peer unicast automaticamente. GATE e
-PROBE fazem mesmo ao receber beacon. `HELLO` repete cada 3 s, permitindo
-redescoberta após reboot. Nenhum MAC precisa ser editado.
+BASE cria peer unicast somente para GATE. PROBE cria peer somente para GATE.
+BASE ignora tráfego direto de PROBE; PROBE ignora `BASE_BEACON`. Assim o teste
+força dois saltos mesmo se BASE ainda for audível. `HELLO` repete cada 3 s.
 
 Link real usa confirmação de aplicação:
 
 ```text
-PROBE -- PING(seq) ------> BASE -- PONG(reply_to=seq) --> PROBE
+PROBE -- PING(route_seq) --> GATE -- RELAY_PING --> BASE
+BASE  -- RELAY_PONG ------> GATE -- PONG(route_seq) --> PROBE
+
 GATE  -- HEARTBEAT(seq) -> BASE -- ACK(reply_to=seq) --> GATE
 ```
 
-`esp_now_send()` e callback TX significam somente fila/rádio; `ONLINE` depende
-de PONG/ACK correspondente. PROBE LED não liga só por beacon.
+GATE faz store-and-forward de aplicação, não repetição RF transparente.
+`ONLINE` PROBE depende de PONG vindo pela rota BASE→GATE→PROBE; LED não liga
+só por beacon.
 
-Pacote binário fixo, 24 bytes:
+Para distinguir a falha de cada salto, GATE responde cada `PING` de PROBE com
+`GATE_BEACON` unicast (`reply_to=PING.sequence`) e informa `baseOnline` no
+bit 1 de `flags`. Essa resposta confirma PROBE↔GATE, mesmo quando o relay até
+BASE falha.
+
+Pacote binário fixo, 32 bytes:
 
 ```text
-magic(2) version(1) type(1) sender_id(1) flags(1) reserved(2)
-sequence(4) timestamp_ms(4) reply_to_sequence(4) metric_ms(4)
+magic(2) version(1) type(1) sender_id(1) origin_id(1) flags(1) hop_count(1)
+sequence(4) timestamp_ms(4) reply_to_sequence(4) origin_sequence(4)
+metric_ms(4) relay_rssi(1) reserved(3)
 ```
 
-Tipos: `HELLO`, `BASE_BEACON`, `PING`, `PONG`, `HEARTBEAT`, `ACK`. `sequence`
-é local por transmissor. Recebedor trata wrap `uint32_t`, estima gaps, conta
-duplicata imediatamente anterior e fora de ordem.
+Tipos: `HELLO`, `BASE_BEACON`, `GATE_BEACON`, `PING`, `PONG`, `RELAY_PING`,
+`RELAY_PONG`, `HEARTBEAT`, `ACK`. `origin_sequence` correlaciona PING PROBE
+nos dois saltos. `relay_rssi` é medido por GATE ao receber PROBE.
 
 PROBE/GATE reportam RTT recém-medido uma vez no próximo PING/HEARTBEAT. BASE
 registra esse valor; assim logger USB da BASE produz RTT de PROBE sem USB móvel.
@@ -106,12 +115,16 @@ Se LED não responder, alterar topo de `esp32s3_probe/esp32s3_probe.ino`:
 #define PROBE_LED_ACTIVE_HIGH 1   // usar 0 se LED ativo baixo
 ```
 
-Durante descoberta LED pisca curto. Depois:
+No RGB integrado do ESP32-S3:
 
 ```text
-PONG válido há menos de 2000 ms -> ON sólido
-sem PONG válido por 2000 ms       -> OFF
+VERDE    PONG válido via GATE há menos de 2000 ms: PROBE→GATE→BASE→GATE→PROBE
+AMARELO  GATE respondeu ao PING, mas falta PONG completo: PROBE↔GATE ativo
+VERMELHO GATE não respondeu há 2000 ms
 ```
+
+Em LED simples, verde/amarelo viram aceso e vermelho vira apagado: não há como
+mostrar três cores sem LED RGB.
 
 ## Core ESP32/RSSI
 
@@ -126,8 +139,8 @@ Callback TX muda separadamente em ESP-IDF 5.5+: usa `esp_now_send_info_t *`;
 anterior usa MAC. Callbacks apenas copiam pacote/contador para fila FreeRTOS.
 Validação, peers, Serial e respostas ocorrem em `loop()`.
 
-Este PC não possui Arduino ESP32 Core nem `arduino-cli`; compilação local não
-foi possível. Boot imprime ESP-IDF detectado e `rx_rssi=AVAILABLE` ou `N/A`.
+Este PC possui Arduino-ESP32 3.2.0, baseado em ESP-IDF 5.4: RSSI RX fica
+disponível. Boot imprime ESP-IDF detectado e `rx_rssi=AVAILABLE` ou `N/A`.
 Se Core incomum falhar, guarde versão exata + erro antes de alterar callbacks.
 
 ## Gravação
@@ -145,7 +158,8 @@ Selecione modelo exato se souber fabricante. Ordem recomendada:
 2. Abrir/gravar `esp32_gate/esp32_gate.ino` no GATE.
 3. Abrir/gravar `esp32s3_probe/esp32s3_probe.ino` no PROBE.
 
-Usar 115200. Durante ensaio, manter somente BASE conectada ao computador.
+Os três precisam usar o protocolo 2; versões antigas não conversam com este
+relay. Usar 115200. Durante ensaio, manter somente BASE conectada ao computador.
 
 ## Logger serial
 
@@ -176,14 +190,15 @@ logs/
 ```
 
 Linhas desconhecidas ficam em `raw.txt`, aparecem terminal, nunca derrubam
-parser. Terminal recebe timestamp host; `raw.txt` não é modificado.
+parser. Ao abrir a porta, o logger descarta bytes pendentes do monitor serial
+anterior; terminal recebe timestamp host e `raw.txt` não é modificado.
 
 BASE emite linhas estruturadas:
 
 ```text
-RX|ms=15234|node=PROBE|mac=AA:BB:CC:DD:EE:FF|type=PING|seq=182|rssi=-63|rtt=7
-TX|ms=15235|node=PROBE|mac=AA:BB:CC:DD:EE:FF|type=PONG|seq=91|reply_to=182|status=QUEUED
-STAT|ms=16000|node=PROBE|mac=AA:BB:CC:DD:EE:FF|online=YES|rx=192|lost=2|dup=0|ooo=0|pdr=98.97|rssi=-64|last_seen=231|rtt=7|rtt_avg=8.2
+RX|ms=15234|node=PROBE|hop=END_TO_END|via=GATE|type=RELAY_PING|seq=182|rssi=-63|base_rssi=-58|rtt=7
+STAT|ms=16000|node=PROBE|hop=END_TO_END|via=GATE|online=YES|rx=192|lost=2|dup=0|ooo=0|pdr=98.97|rssi=-64|last_seen=231|rtt=7|rtt_avg=8.2
+STAT|ms=16000|node=GATE|hop=GATE_BASE|online=YES|rx=205|lost=0|dup=0|ooo=0|pdr=100.00|rssi=-58|last_seen=34|rtt=4|rtt_avg=4.3
 EVENT|ms=19000|node=PROBE|state=OFFLINE
 ```
 
@@ -194,8 +209,8 @@ outage. RSSI fica dBm; software nunca inventa metros.
 
 ### Teste 1 — bancada
 
-Três placas próximas. Esperar BASE detectar GATE + PROBE, ambos ONLINE, RSSI e
-sequências coerentes. LED PROBE deve ON sólido.
+Três placas próximas. Esperar BASE detectar GATE e PROBE `via=GATE`, ambos
+ONLINE, RSSI e sequências coerentes. LED PROBE deve ON sólido.
 
 ### Teste 2 — casa
 
@@ -204,8 +219,9 @@ BASE escritório; levar PROBE por cômodos. Observar RSSI, RTT, PDR e LED.
 ### Teste 3 — portão
 
 BASE escritório, GATE portão. Levar PROBE até portão, depois seguir linha
-aproximadamente reta. LED ON = PING/PONG bidirecional recente; OFF = timeout.
-Voltar alguns metros e confirmar recuperação automática.
+aproximadamente reta. Verde = cadeia inteira; amarelo = somente PROBE↔GATE;
+vermelho = GATE sem resposta. No log BASE, `rssi` é PROBE→GATE e `base_rssi`
+é GATE→BASE. Voltar alguns metros e confirmar recuperação automática.
 
 ### Teste 4 — limite
 
@@ -219,3 +235,5 @@ PDR, RTT e eventos ONLINE/OFFLINE para fading, interferência e sombras.
   para peers encrypted sem alterar struct.
 - Antena, orientação, paredes e interferência Wi-Fi afetam muito resultado.
 - `QUEUE_DROPS` BASE indica saturação callback->loop; anotar ensaio separado.
+- GATE não amplia o sinal de um pacote no ar: recebe, processa e transmite um
+  novo pacote. A taxa útil e latência da rota sofrem dois saltos.
