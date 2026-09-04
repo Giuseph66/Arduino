@@ -19,7 +19,7 @@ byte channel1 = 14;  ///Radio1: pares (14,16,18...)
 byte channel2 = 15;  ///Radio2: ímpares (15,17,19...)
 
 unsigned int flag1 = 0;
-unsigned int flag2 = 0;
+unsigned int flag2 = 0 ;
 
 
 
