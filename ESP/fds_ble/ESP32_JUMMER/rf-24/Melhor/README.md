@@ -33,31 +33,35 @@ Essa faixa cobre:
 
 ## Mapa de pinos
 
-### Radio 1 — HSPI
+> **Por que esses pinos?**
+> Os pinos padrão do HSPI (GPIO12, GPIO15) são boot strapping no ESP32 — se estiverem em nível lógico errado durante o boot, o chip pode não iniciar ou mudar a tensão da flash.
+> GPIO16 é usado pela PSRAM em módulos WROVER. Os pinos abaixo foram escolhidos por serem completamente livres dessas funções.
 
-| nRF24L01+ | ESP32 GPIO |
-|---|---|
-| VCC | 3.3V |
-| GND | GND |
-| CE | **GPIO 16** |
-| CSN | **GPIO 15** |
-| SCK | **GPIO 14** |
-| MOSI | **GPIO 13** |
-| MISO | **GPIO 12** |
-| IRQ | (não conectar) |
+### Radio 1 — HSPI (pinos seguros)
 
-### Radio 2 — VSPI
+| nRF24L01+ | ESP32 GPIO | Observação |
+|---|---|---|
+| VCC | 3.3V | |
+| GND | GND | |
+| CE | **GPIO 33** | Limpo, sem função especial |
+| CSN | **GPIO 32** | Limpo, sem função especial |
+| SCK | **GPIO 14** | HSPI_CLK nativo |
+| MOSI | **GPIO 13** | HSPI_MOSI nativo |
+| MISO | **GPIO 25** | Limpo — evita GPIO12 (boot strapping MTDI) |
+| IRQ | (não conectar) | |
 
-| nRF24L01+ | ESP32 GPIO |
-|---|---|
-| VCC | 3.3V |
-| GND | GND |
-| CE | **GPIO 22** |
-| CSN | **GPIO 21** |
-| SCK | **GPIO 18** |
-| MOSI | **GPIO 23** |
-| MISO | **GPIO 19** |
-| IRQ | (não conectar) |
+### Radio 2 — VSPI (pinos nativos — todos limpos)
+
+| nRF24L01+ | ESP32 GPIO | Observação |
+|---|---|---|
+| VCC | 3.3V | |
+| GND | GND | |
+| CE | **GPIO 22** | Limpo |
+| CSN | **GPIO 21** | Limpo |
+| SCK | **GPIO 18** | VSPI_CLK nativo |
+| MOSI | **GPIO 23** | VSPI_MOSI nativo |
+| MISO | **GPIO 19** | VSPI_MISO nativo |
+| IRQ | (não conectar) | |
 
 ---
 
@@ -127,6 +131,7 @@ O módulo básico sem PA/LNA tem saída de apenas **0 dBm** (1 mW) e alcance de 
 | Modo sweep | só sequencial | sequencial + aleatório + hopping |
 | Rádios | 1 | **2** (cobertura dupla) |
 | Desligar ESP32 Wi-Fi/BT | parcial | **completo** (`disconnect` também) |
+| Pinos HSPI | GPIO12/15/16 (boot strapping!) | **GPIO25/32/33** (limpos) |
 | Comentários | inglês | **português** |
 
 ---
