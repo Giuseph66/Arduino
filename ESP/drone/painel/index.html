@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel IMU</title>
+<style>
+  :root {
+    --bg: #0b0f14; --panel: #121821; --border: #1f2a37; --text: #e6edf3;
+    --muted: #8b98a8; --accent: #3fb1ff; --ok: #3ddc84; --warn: #ffb020; --err: #ff5c5c;
+    --roll: #ff7a59; --pitch: #3ddc84; --yaw: #3fb1ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px;
+    border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0 12px 0 0; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  button, input { font: inherit; color: var(--text); background: #1a2230; border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #041018; border-color: var(--accent); font-weight: 600; }
+  input:not([type=checkbox]) { width: 200px; }
+  input[type=checkbox] { width: auto; padding: 0; margin: 0; accent-color: var(--accent); }
+  .status { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--err); }
+  .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  main { display: grid; grid-template-columns: 1fr 300px; min-height: 0; }
+  #view { position: relative; min-height: 0; }
+  #view canvas { display: block; }
+  #hud { position: absolute; left: 12px; top: 12px; display: flex; gap: 8px; }
+  .chip { padding: 6px 10px; border-radius: 6px; background: rgba(18,24,33,.85); border: 1px solid var(--border);
+    font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; min-width: 108px; }
+  .chip small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); letter-spacing: .06em; }
+  .chip.r { border-left: 3px solid var(--roll); } .chip.p { border-left: 3px solid var(--pitch); } .chip.y { border-left: 3px solid var(--yaw); }
+  aside { border-left: 1px solid var(--border); background: var(--panel); padding: 14px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 14px; }
+  section h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 6px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td { padding: 3px 0; border-bottom: 1px solid var(--border); }
+  td:last-child { text-align: right; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  canvas.graph { width: 100%; height: 80px; background: #0d1219; border: 1px solid var(--border); border-radius: 6px; }
+  label.tg { display: flex; align-items: center; gap: 6px; padding: 3px 0; color: var(--muted); }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .row button { flex: 1; }
+  #log { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); white-space: pre-wrap; max-height: 90px; overflow: auto; }
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 55vh 1fr; }
+    aside { border-left: 0; border-top: 1px solid var(--border); }
+    input:not([type=checkbox]) { width: 140px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Painel IMU · MPU6050</h1>
+  <button id="btnSerial" class="primary">Conectar USB (Serial)</button>
+  <input id="wsUrl" placeholder="ws://192.168.4.1/ws">
+  <button id="btnWs">Conectar WebSocket</button>
+  <button id="btnDemo">Demo</button>
+  <div class="status"><span class="dot" id="dot"></span><span id="statusTxt">desconectado</span><span id="hz"></span></div>
+</header>
+<main>
+  <div id="view">
+    <div id="hud">
+      <div class="chip r"><small>ROLL</small><span id="hr">0.0°</span></div>
+      <div class="chip p"><small>PITCH</small><span id="hp">0.0°</span></div>
+      <div class="chip y"><small>YAW</small><span id="hy">0.0°</span></div>
+    </div>
+  </div>
+  <aside>
+    <section>
+      <h2>Controles</h2>
+      <div class="row">
+        <button id="btnRef" class="primary">Posição atual = nível</button>
+        <button id="btnZeroYaw">Zerar yaw</button>
+      </div>
+      <div class="row">
+        <button id="btnClearRef">Limpar referência</button>
+        <button id="btnCal">Calibrar gyro</button>
+        <button id="btnCam">Câmera</button>
+      </div>
+      <div id="refInfo" style="color:var(--muted);font-size:12px;margin-top:6px">sem referência — captura automática ao conectar</div>
+    </section>
+    <section>
+      <h2>Acelerômetro (m/s²)</h2>
+      <canvas class="graph" id="gAcc"></canvas>
+      <table><tr><td>X</td><td id="ax">—</td></tr><tr><td>Y</td><td id="ay">—</td></tr><tr><td>Z</td><td id="az">—</td></tr><tr><td>|a|</td><td id="am">—</td></tr></table>
+    </section>
+    <section>
+      <h2>Giroscópio (°/s)</h2>
+      <canvas class="graph" id="gGyr"></canvas>
+      <table><tr><td>X</td><td id="gx">—</td></tr><tr><td>Y</td><td id="gy">—</td></tr><tr><td>Z</td><td id="gz">—</td></tr><tr><td>Temp</td><td id="tp">—</td></tr></table>
+    </section>
+    <section>
+      <h2>Eixos</h2>
+      <label class="tg"><input type="checkbox" id="invR"> Inverter roll</label>
+      <label class="tg"><input type="checkbox" id="invP"> Inverter pitch</label>
+      <label class="tg"><input type="checkbox" id="invY"> Inverter yaw</label>
+      <label class="tg"><input type="checkbox" id="swapRP"> Trocar roll ↔ pitch</label>
+      <label class="tg"><input type="checkbox" id="smooth" checked> Suavizar</label>
+    </section>
+    <section>
+      <h2>Log</h2>
+      <div id="log"></div>
+    </section>
+  </aside>
+</main>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $ = id => document.getElementById(id);
+const log = m => { const el = $('log'); el.textContent = (m + '\n' + el.textContent).slice(0, 2000); };
+
+// ---------- Cena 3D ----------
+const view = $('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f14);
+scene.fog = new THREE.Fog(0x0b0f14, 14, 40);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+const CAM0 = new THREE.Vector3(6, 4, 7);
+camera.position.copy(CAM0);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x101418, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+sun.position.set(5, 8, 4);
+scene.add(sun);
+
+const grid = new THREE.GridHelper(30, 30, 0x1f2a37, 0x161d27);
+grid.position.y = -2;
+scene.add(grid);
+
+// Referência mundo: X=vermelho, Y=verde (cima), Z=azul
+scene.add(new THREE.AxesHelper(1.2));
+
+// ---------- Avião (nariz aponta -Z, asas no eixo X, Y para cima) ----------
+function buildPlane() {
+  const g = new THREE.Group();
+  const body = new THREE.MeshStandardMaterial({ color: 0xd9dde3, metalness: 0.3, roughness: 0.45 });
+  const accent = new THREE.MeshStandardMaterial({ color: 0x3fb1ff, metalness: 0.2, roughness: 0.5 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x1b2430, metalness: 0.4, roughness: 0.4 });
+
+  // fuselagem
+  const fus = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.22, 3.6, 24), body);
+  fus.rotation.x = Math.PI / 2;
+  g.add(fus);
+  // nariz
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.8, 24), accent);
+  nose.rotation.x = -Math.PI / 2;
+  nose.position.z = -2.2;
+  g.add(nose);
+  // cauda
+  const tailCone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.7, 24), body);
+  tailCone.rotation.x = Math.PI / 2;
+  tailCone.position.z = 2.15;
+  g.add(tailCone);
+  // cabine
+  const cockpit = new THREE.Mesh(new THREE.SphereGeometry(0.24, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), dark);
+  cockpit.position.set(0, 0.2, -0.9);
+  cockpit.scale.set(1, 0.9, 1.8);
+  g.add(cockpit);
+  // asas
+  const wingShape = new THREE.Shape();
+  wingShape.moveTo(0, -0.55); wingShape.lineTo(2.6, -0.2); wingShape.lineTo(2.6, 0.15); wingShape.lineTo(0, 0.55); wingShape.lineTo(0, -0.55);
+  const wingGeo = new THREE.ExtrudeGeometry(wingShape, { depth: 0.07, bevelEnabled: false });
+  wingGeo.rotateX(Math.PI / 2);
+  const wR = new THREE.Mesh(wingGeo, body); wR.position.set(0, -0.05, 0.2); g.add(wR);
+  const wL = wR.clone(); wL.scale.x = -1; g.add(wL);
+  // pontas das asas (cor: esquerda vermelha, direita verde — convenção aeronáutica)
+  const tipL = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.09, 0.4), new THREE.MeshStandardMaterial({ color: 0xff5c5c, emissive: 0x551111 }));
+  tipL.position.set(-2.55, -0.05, 0.15); g.add(tipL);
+  const tipR = tipL.clone(); tipR.material = new THREE.MeshStandardMaterial({ color: 0x3ddc84, emissive: 0x115522 }); tipR.position.x = 2.55; g.add(tipR);
+  // estabilizador horizontal
+  const hs = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.06, 0.5), body);
+  hs.position.set(0, 0.05, 1.9); g.add(hs);
+  // leme vertical
+  const vsShape = new THREE.Shape();
+  vsShape.moveTo(0, 0); vsShape.lineTo(0.7, 0); vsShape.lineTo(0.55, 0.75); vsShape.lineTo(0.2, 0.75); vsShape.lineTo(0, 0);
+  const vsGeo = new THREE.ExtrudeGeometry(vsShape, { depth: 0.06, bevelEnabled: false });
+  vsGeo.rotateY(-Math.PI / 2);
+  const vs = new THREE.Mesh(vsGeo, accent); vs.position.set(0.03, 0.15, 1.6); g.add(vs);
+  // hélice
+  const prop = new THREE.Group();
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.1, 0.04), dark);
+  prop.add(blade, blade.clone().rotateZ(Math.PI / 2));
+  prop.position.z = -2.62;
+  g.add(prop);
+  g.userData.prop = prop;
+  return g;
+}
+const plane = buildPlane();
+scene.add(plane);
+
+// Sombra fantasma no chão (projeção da orientação atual)
+const shadow = new THREE.Mesh(new THREE.CircleGeometry(2.2, 40), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 }));
+shadow.rotation.x = -Math.PI / 2; shadow.position.y = -1.99; scene.add(shadow);
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(view);
+resize();
+
+// ---------- Estado ----------
+const state = { r: 0, p: 0, y: 0, ax: 0, ay: 0, az: 0, gx: 0, gy: 0, gz: 0, t: 0 };
+const target = new THREE.Euler(0, 0, 0, 'YXZ');
+const cur = new THREE.Quaternion(), tq = new THREE.Quaternion();
+let yawOffset = 0, quietSecs = 0;
+let samples = 0, lastHzT = performance.now();
+const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+
+// Frame do sensor (x frente, y esquerda, z cima) -> frame three.js (frente -Z, esquerda -X, cima +Y)
+const S2T = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+  new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0)));
+const S2Tinv = S2T.clone().invert();
+
+// Referência ("nível"): pose do sensor considerada avião reto e nivelado
+let qRef = null, qRefInv = null, firstDataT = 0;
+const qSensor = new THREE.Quaternion(), qWorld = new THREE.Quaternion(), qRel = new THREE.Quaternion();
+function setRef(q) {
+  qRef = q ? q.clone() : null;
+  qRefInv = qRef ? qRef.clone().invert() : null;
+  try { qRef ? localStorage.setItem('imuRef', JSON.stringify(qRef.toArray())) : localStorage.removeItem('imuRef'); } catch {}
+  $('refInfo').textContent = qRef ? 'referência definida (salva no navegador)' : 'sem referência — captura automática ao conectar';
+}
+try { const r = JSON.parse(localStorage.getItem('imuRef')); if (r?.length === 4) setRef(new THREE.Quaternion().fromArray(r)); } catch {}
+
+const histN = 150;
+const hist = { ax: [], ay: [], az: [], gx: [], gy: [], gz: [] };
+function push(k, v) { const a = hist[k]; a.push(v); if (a.length > histN) a.shift(); }
+
+function onSample(d) {
+  Object.assign(state, d);
+  samples++;
+  if (!firstDataT) firstDataT = performance.now();
+
+  if (d.q) {
+    // firmware quaternion [w,x,y,z] (sensor->mundo) convertido para frame three.js
+    qSensor.set(d.q[1], d.q[2], d.q[3], d.q[0]);
+    qWorld.copy(S2T).multiply(qSensor).multiply(S2Tinv);
+  } else {
+    // fallback: firmware antigo só com euler
+    qWorld.setFromEuler(new THREE.Euler(d.p * D2R, d.y * D2R, d.r * D2R, 'YXZ'));
+  }
+  // captura automática da referência 1,5 s após os primeiros dados
+  if (!qRef && performance.now() - firstDataT > 1500) { setRef(qWorld); log('referência capturada automaticamente'); }
+
+  // rotação relativa à referência, expressa no frame do mundo: q * ref⁻¹
+  qRel.copy(qWorld);
+  if (qRefInv) qRel.multiply(qRefInv);
+
+  const e = new THREE.Euler().setFromQuaternion(qRel, 'YXZ');
+  let p = e.x * R2D, y = e.y * R2D - yawOffset, r = -e.z * R2D; // roll aeronáutico: asa direita baixa = +
+  if (y > 180) y -= 360; if (y < -180) y += 360;
+  if ($('swapRP').checked) [r, p] = [p, r];
+  if ($('invR').checked) r = -r;
+  if ($('invP').checked) p = -p;
+  if ($('invY').checked) y = -y;
+  target.set(p * D2R, y * D2R, -r * D2R, 'YXZ');
+  tq.setFromEuler(target);
+  ['ax','ay','az','gx','gy','gz'].forEach(k => push(k, d[k] ?? 0));
+
+  $('hr').textContent = r.toFixed(1) + '°';
+  $('hp').textContent = p.toFixed(1) + '°';
+  $('hy').textContent = y.toFixed(1) + '°';
+  $('ax').textContent = d.ax.toFixed(2); $('ay').textContent = d.ay.toFixed(2); $('az').textContent = d.az.toFixed(2);
+  $('am').textContent = Math.hypot(d.ax, d.ay, d.az).toFixed(2);
+  $('gx').textContent = d.gx.toFixed(1); $('gy').textContent = d.gy.toFixed(1); $('gz').textContent = d.gz.toFixed(1);
+  $('tp').textContent = (d.t ?? 0).toFixed(1) + ' °C';
+}
+
+// ---------- Gráficos ----------
+function drawGraph(cv, keys, colors, range) {
+  const ctx = cv.getContext('2d');
+  const W = cv.width = cv.clientWidth * devicePixelRatio, H = cv.height = cv.clientHeight * devicePixelRatio;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = '#1f2a37'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+  keys.forEach((k, i) => {
+    const a = hist[k]; if (!a.length) return;
+    ctx.strokeStyle = colors[i]; ctx.lineWidth = 1.5 * devicePixelRatio; ctx.beginPath();
+    a.forEach((v, j) => {
+      const x = j / (histN - 1) * W, y = H / 2 - Math.max(-1, Math.min(1, v / range)) * (H / 2 - 4);
+      j ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.stroke();
+  });
+}
+const C = ['#ff7a59', '#3ddc84', '#3fb1ff'];
+
+// ---------- Loop ----------
+function animate() {
+  requestAnimationFrame(animate);
+  const smooth = $('smooth').checked;
+  cur.slerp(tq, smooth ? 0.25 : 1);
+  plane.quaternion.copy(cur);
+  plane.userData.prop.rotation.z += 0.4;
+  controls.update();
+  renderer.render(scene, camera);
+  drawGraph($('gAcc'), ['ax','ay','az'], C, 20);
+  drawGraph($('gGyr'), ['gx','gy','gz'], C, 250);
+  const now = performance.now();
+  if (now - lastHzT > 1000) {
+    $('hz').textContent = samples ? `· ${samples} Hz` : '';
+    if (!samples && $('dot').classList.contains('on') && $('statusTxt').textContent !== 'demo') {
+      if (++quietSecs === 3) log('conectado mas 0 Hz — ESP em bootloader? aperte EN/RESET na placa');
+    } else quietSecs = 0;
+    samples = 0; lastHzT = now;
+  }
+}
+animate();
+
+// ---------- Fontes de dados ----------
+let sendCmd = null;
+function setStatus(on, txt) { $('dot').classList.toggle('on', on); $('statusTxt').textContent = txt; }
+
+function resetSession() { firstDataT = 0; quietSecs = 0; }
+function feedLine(line) {
+  line = line.trim();
+  if (!line.startsWith('{')) return;
+  try {
+    const d = JSON.parse(line);
+    if (d.err) { log('ESP: ' + d.err); return; }
+    if ('r' in d) onSample(d);
+  } catch { /* linha parcial */ }
+}
+
+// Web Serial
+let port = null, reader = null, writer = null, wantSerial = false;
+async function openSerial(p) {
+  port = p;
+  try {
+    await port.open({ baudRate: 115200 });
+  } catch (e) {
+    log(/open/i.test(e.message) ? 'serial: porta ocupada (Serial Monitor da IDE ou bridge.py?)' : 'serial: ' + e.message);
+    port = null; return;
+  }
+  resetSession();
+  setStatus(true, 'serial conectado');
+  $('btnSerial').textContent = 'Desconectar';
+  writer = port.writable.getWriter();
+  sendCmd = c => writer.write(new TextEncoder().encode(c)).catch(() => {});
+  reader = port.readable.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      lines.forEach(feedLine);
+    }
+  } catch (e) { log('serial: ' + e.message); }
+  try { reader.releaseLock(); } catch {}
+  try { writer.releaseLock(); } catch {}
+  try { await port.close(); } catch {}
+  port = reader = writer = sendCmd = null;
+  $('btnSerial').textContent = 'Conectar USB (Serial)';
+  setStatus(false, wantSerial ? 'USB perdido — aguardando reconexão' : 'desconectado');
+}
+$('btnSerial').onclick = async () => {
+  if (port) { wantSerial = false; await reader?.cancel().catch(() => {}); return; }
+  if (!('serial' in navigator)) { alert('Web Serial indisponível. Use Chrome/Edge.'); return; }
+  try {
+    const p = await navigator.serial.requestPort();
+    wantSerial = true;
+    openSerial(p);
+  } catch (e) { log('serial: ' + e.message); }
+};
+// Reconecta sozinho quando o dispositivo já autorizado volta (cabo/reset)
+if ('serial' in navigator) {
+  navigator.serial.addEventListener('connect', e => {
+    if (wantSerial && !port) { log('USB voltou, reconectando'); openSerial(e.target); }
+  });
+  navigator.serial.getPorts().then(ps => { if (ps.length) { wantSerial = true; openSerial(ps[0]); } });
+}
+
+// WebSocket
+let ws;
+$('btnWs').onclick = () => {
+  if (ws) { ws.close(); return; }
+  const url = $('wsUrl').value.trim() || 'ws://192.168.4.1/ws';
+  ws = new WebSocket(url);
+  ws.onopen = () => { resetSession(); setStatus(true, 'ws conectado'); $('btnWs').textContent = 'Desconectar'; sendCmd = c => ws.send(c); };
+  ws.onmessage = e => feedLine(e.data);
+  ws.onerror = () => log('ws: erro em ' + url);
+  ws.onclose = () => { ws = sendCmd = null; $('btnWs').textContent = 'Conectar WebSocket'; setStatus(false, 'desconectado'); };
+};
+
+// Demo
+let demo = null;
+$('btnDemo').onclick = () => {
+  if (demo) { clearInterval(demo); demo = null; setStatus(false, 'desconectado'); return; }
+  let t = 0;
+  setStatus(true, 'demo');
+  demo = setInterval(() => {
+    t += 0.02;
+    onSample({ r: 35 * Math.sin(t), p: 20 * Math.sin(t * 0.7), y: 40 * Math.sin(t * 0.3),
+      ax: 3 * Math.sin(t * 2), ay: 2 * Math.cos(t * 1.3), az: 9.8 + Math.sin(t * 4),
+      gx: 60 * Math.cos(t), gy: 40 * Math.cos(t * 0.7), gz: 30 * Math.cos(t * 0.3), t: 27.5 });
+  }, 20);
+};
+
+$('btnRef').onclick = () => { setRef(qWorld); yawOffset = 0; log('posição atual definida como nível'); };
+$('btnClearRef').onclick = () => { setRef(null); yawOffset = 0; firstDataT = performance.now(); };
+$('btnZeroYaw').onclick = () => { const e = new THREE.Euler().setFromQuaternion(qRel, 'YXZ'); yawOffset = e.y * R2D; };
+$('btnCal').onclick = () => { if (sendCmd) { sendCmd('c'); log('calibrando gyro — mantenha parado 1s'); } else log('sem conexão'); };
+$('btnCam').onclick = () => { camera.position.copy(CAM0); controls.target.set(0, 0, 0); };
+</script>
+</body>
+</html>
