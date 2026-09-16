@@ -23,6 +23,7 @@
   button:hover { border-color: var(--accent); }
   button.primary { background: var(--accent); color: #041018; border-color: var(--accent); font-weight: 600; }
   input:not([type=checkbox]) { width: 200px; }
+  input[type=range] { width: auto; padding: 0; accent-color: var(--accent); }
   input[type=checkbox] { width: auto; padding: 0; margin: 0; accent-color: var(--accent); }
   .status { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--err); }
@@ -35,6 +36,8 @@
     font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; min-width: 108px; }
   .chip small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); letter-spacing: .06em; }
   .chip.r { border-left: 3px solid var(--roll); } .chip.p { border-left: 3px solid var(--pitch); } .chip.y { border-left: 3px solid var(--yaw); }
+  #hint { position: absolute; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px; pointer-events: none; }
+  #hint b { color: var(--text); }
   aside { border-left: 1px solid var(--border); background: var(--panel); padding: 14px; overflow-y: auto;
     display: flex; flex-direction: column; gap: 14px; }
   section h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 6px; }
@@ -48,7 +51,9 @@
   #log { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); white-space: pre-wrap; max-height: 90px; overflow: auto; }
   @media (max-width: 800px) {
     main { grid-template-columns: 1fr; grid-template-rows: 55vh 1fr; }
-    aside { border-left: 0; border-top: 1px solid var(--border); }
+    #hint { position: absolute; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px; pointer-events: none; }
+  #hint b { color: var(--text); }
+  aside { border-left: 0; border-top: 1px solid var(--border); }
     input:not([type=checkbox]) { width: 140px; }
   }
 </style>
@@ -69,6 +74,7 @@
       <div class="chip p"><small>PITCH</small><span id="hp">0.0°</span></div>
       <div class="chip y"><small>YAW</small><span id="hy">0.0°</span></div>
     </div>
+    <div id="hint">arraste: orbitar · scroll: zoom · botão direito: pan · <b>W A S D</b> mover · <b>Q E</b> descer/subir · <b>Shift</b> rápido</div>
   </div>
   <aside>
     <section>
@@ -85,6 +91,18 @@
       <div id="refInfo" style="color:var(--muted);font-size:12px;margin-top:6px">sem referência — captura automática ao conectar</div>
     </section>
     <section>
+      <h2>Voo</h2>
+      <div class="row">
+        <button id="btnFly" class="primary">Modo voo</button>
+        <button id="btnRespawn">Reposicionar</button>
+      </div>
+      <label class="tg" style="margin-top:6px">Velocidade <input type="range" id="speed" min="0" max="30" step="0.5" value="8" style="flex:1"> <span id="speedV">8</span></label>
+      <label class="tg"><input type="checkbox" id="bankTurn"> Curvar ao inclinar (roll)</label>
+      <label class="tg"><input type="checkbox" id="useVel"> Velocidade do sensor (experimental)</label>
+      <label class="tg"><input type="checkbox" id="chase" checked> Câmera persegue</label>
+      <table><tr><td>Vel. estimada</td><td id="velEst">—</td></tr><tr><td>Altitude</td><td id="alt">—</td></tr><tr><td>Distância</td><td id="dist">—</td></tr></table>
+    </section>
+    <section>
       <h2>Acelerômetro (m/s²)</h2>
       <canvas class="graph" id="gAcc"></canvas>
       <table><tr><td>X</td><td id="ax">—</td></tr><tr><td>Y</td><td id="ay">—</td></tr><tr><td>Z</td><td id="az">—</td></tr><tr><td>|a|</td><td id="am">—</td></tr></table>
@@ -97,9 +115,9 @@
     <section>
       <h2>Eixos</h2>
       <label class="tg"><input type="checkbox" id="invR"> Inverter roll</label>
-      <label class="tg"><input type="checkbox" id="invP"> Inverter pitch</label>
+      <label class="tg"><input type="checkbox" id="invP" checked> Inverter pitch</label>
       <label class="tg"><input type="checkbox" id="invY"> Inverter yaw</label>
-      <label class="tg"><input type="checkbox" id="swapRP"> Trocar roll ↔ pitch</label>
+      <label class="tg"><input type="checkbox" id="swapRP" checked> Trocar roll ↔ pitch</label>
       <label class="tg"><input type="checkbox" id="smooth" checked> Suavizar</label>
     </section>
     <section>
@@ -135,14 +153,17 @@ const CAM0 = new THREE.Vector3(6, 4, 7);
 camera.position.copy(CAM0);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
+controls.minDistance = 2; controls.maxDistance = 40;
+controls.screenSpacePanning = false; // pan desliza no plano do chão
 
 scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x101418, 1.1));
 const sun = new THREE.DirectionalLight(0xffffff, 1.4);
 sun.position.set(5, 8, 4);
 scene.add(sun);
 
-const grid = new THREE.GridHelper(30, 30, 0x1f2a37, 0x161d27);
-grid.position.y = -2;
+const GROUND_Y = -2;
+const grid = new THREE.GridHelper(60, 60, 0x1f2a37, 0x161d27);
+grid.position.y = GROUND_Y;
 scene.add(grid);
 
 // Referência mundo: X=vermelho, Y=verde (cima), Z=azul
@@ -242,11 +263,48 @@ function setRef(q) {
 }
 try { const r = JSON.parse(localStorage.getItem('imuRef')); if (r?.length === 4) setRef(new THREE.Quaternion().fromArray(r)); } catch {}
 
+// toggles de eixo persistidos no navegador
+for (const id of ['invR','invP','invY','swapRP','smooth']) {
+  try { const v = localStorage.getItem('tg_' + id); if (v !== null) $(id).checked = v === '1'; } catch {}
+  $(id).addEventListener('change', () => { try { localStorage.setItem('tg_' + id, $(id).checked ? '1' : '0'); } catch {} });
+}
+
+// ---------- Velocidade estimada (integração + ZUPT) ----------
+// Integra aceleração linear no frame do mundo. Drifta com bias do sensor, então:
+// ZUPT: parado (|a|≈g, gyro≈0) por 0,3 s -> v = 0 e reestima bias.
+// Leak: v decai lentamente para limitar crescimento do erro.
+const vel = new THREE.Vector3(), aLin = new THREE.Vector3(), aBias = new THREE.Vector3();
+const _gS = new THREE.Vector3(), _aS = new THREE.Vector3();
+let lastSampleT = 0, stillSince = 0;
+const G = 9.81;
+function updateVelocity(d) {
+  const now = performance.now();
+  const dt = lastSampleT ? Math.min((now - lastSampleT) / 1000, 0.1) : 0;
+  lastSampleT = now;
+  if (!d.q || !dt) return;
+  // gravidade esperada no frame do sensor: rotaciona (0,0,g) pelo inverso de q
+  _gS.set(0, 0, G).applyQuaternion(qSensor.clone().invert());
+  _aS.set(d.ax, d.ay, d.az).sub(_gS).sub(aBias);
+  const gyroMag = Math.hypot(d.gx, d.gy, d.gz);
+  const still = _aS.length() < 0.5 && gyroMag < 3; // aceleração linear residual ~0 e sem rotação
+  if (still) {
+    if (!stillSince) stillSince = now;
+    if (now - stillSince > 300) {
+      vel.set(0, 0, 0);
+      aBias.lerp(_aS.clone().add(aBias), 0.02); // média lenta do resíduo em repouso
+      return;
+    }
+  } else stillSince = 0;
+  aLin.copy(_aS).applyQuaternion(qSensor); // sensor -> mundo (z cima)
+  vel.addScaledVector(aLin, dt);
+  vel.multiplyScalar(Math.pow(0.7, dt)); // leak: meia-vida ~2 s
+}
+
 const histN = 150;
 const hist = { ax: [], ay: [], az: [], gx: [], gy: [], gz: [] };
 function push(k, v) { const a = hist[k]; a.push(v); if (a.length > histN) a.shift(); }
 
-function onSample(d) {
+function onSample(d, raw = false) { // raw: ignora referência (demo)
   Object.assign(state, d);
   samples++;
   if (!firstDataT) firstDataT = performance.now();
@@ -254,17 +312,18 @@ function onSample(d) {
   if (d.q) {
     // firmware quaternion [w,x,y,z] (sensor->mundo) convertido para frame three.js
     qSensor.set(d.q[1], d.q[2], d.q[3], d.q[0]);
+    updateVelocity(d);
     qWorld.copy(S2T).multiply(qSensor).multiply(S2Tinv);
   } else {
     // fallback: firmware antigo só com euler
     qWorld.setFromEuler(new THREE.Euler(d.p * D2R, d.y * D2R, d.r * D2R, 'YXZ'));
   }
   // captura automática da referência 1,5 s após os primeiros dados
-  if (!qRef && performance.now() - firstDataT > 1500) { setRef(qWorld); log('referência capturada automaticamente'); }
+  if (!raw && !qRef && performance.now() - firstDataT > 1500) { setRef(qWorld); log('referência capturada automaticamente'); }
 
   // rotação relativa à referência, expressa no frame do mundo: q * ref⁻¹
   qRel.copy(qWorld);
-  if (qRefInv) qRel.multiply(qRefInv);
+  if (qRefInv && !raw) qRel.multiply(qRefInv);
 
   const e = new THREE.Euler().setFromQuaternion(qRel, 'YXZ');
   let p = e.x * R2D, y = e.y * R2D - yawOffset, r = -e.z * R2D; // roll aeronáutico: asa direita baixa = +
@@ -284,6 +343,7 @@ function onSample(d) {
   $('am').textContent = Math.hypot(d.ax, d.ay, d.az).toFixed(2);
   $('gx').textContent = d.gx.toFixed(1); $('gy').textContent = d.gy.toFixed(1); $('gz').textContent = d.gz.toFixed(1);
   $('tp').textContent = (d.t ?? 0).toFixed(1) + ' °C';
+  $('velEst').textContent = d.q ? vel.length().toFixed(2) + ' m/s' : 'sem quaternion';
 }
 
 // ---------- Gráficos ----------
@@ -305,12 +365,117 @@ function drawGraph(cv, keys, colors, range) {
 }
 const C = ['#ff7a59', '#3ddc84', '#3fb1ff'];
 
+// ---------- Navegação por teclado ----------
+const keys = new Set();
+addEventListener('keydown', e => { if (e.target.tagName !== 'INPUT') keys.add(e.code); });
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+const _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _move = new THREE.Vector3();
+let lastFrameT = performance.now();
+function flyCamera(dt) {
+  if (!keys.size) return;
+  const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 12 : 4) * dt;
+  camera.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+  _right.crossVectors(_fwd, camera.up).normalize();
+  _move.set(0, 0, 0);
+  if (keys.has('KeyW')) _move.add(_fwd);
+  if (keys.has('KeyS')) _move.sub(_fwd);
+  if (keys.has('KeyD')) _move.add(_right);
+  if (keys.has('KeyA')) _move.sub(_right);
+  if (keys.has('KeyE') || keys.has('Space')) _move.y += 1;
+  if (keys.has('KeyQ')) _move.y -= 1;
+  if (_move.lengthSq() === 0) return;
+  _move.normalize().multiplyScalar(speed);
+  camera.position.add(_move);
+  controls.target.add(_move);
+}
+
+// ---------- Modo voo ----------
+const fly = { on: false, headingExtra: 0, dist: 0 };
+const TRAIL_N = 600;
+const trailGeo = new THREE.BufferGeometry();
+trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_N * 3), 3));
+trailGeo.setDrawRange(0, 0);
+const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0x3fb1ff, transparent: true, opacity: 0.6 }));
+trail.frustumCulled = false;
+scene.add(trail);
+let trailLen = 0, trailAcc = 0;
+const _f = new THREE.Vector3(), _camDesired = new THREE.Vector3(), _yawQ = new THREE.Quaternion(), _e = new THREE.Euler();
+const UP = new THREE.Vector3(0, 1, 0);
+
+function respawn() {
+  plane.position.set(0, 0, 0);
+  fly.headingExtra = 0; fly.dist = 0;
+  trailLen = 0; trailGeo.setDrawRange(0, 0);
+  camera.position.copy(CAM0); controls.target.set(0, 0, 0);
+}
+function setFly(on) {
+  fly.on = on;
+  $('btnFly').textContent = on ? 'Parar voo' : 'Modo voo';
+  $('btnFly').classList.toggle('primary', !on);
+  $('hint').innerHTML = on
+    ? 'incline o sensor para guiar · <b>velocidade</b> no painel · scroll: zoom · arraste: olhar em volta'
+    : 'arraste: orbitar · scroll: zoom · botão direito: pan · <b>W A S D</b> mover · <b>Q E</b> descer/subir · <b>Shift</b> rápido';
+  if (!on) respawn();
+}
+function stepFlight(dt) {
+  const speed = $('useVel').checked ? vel.length() * 3 : parseFloat($('speed').value); // ganho 3x p/ ficar visível
+  // curva coordenada: rolar faz virar (taxa ~ tan(roll))
+  if ($('bankTurn').checked) {
+    _e.setFromQuaternion(cur, 'YXZ');
+    const rollRad = -_e.z; // convenção aeronáutica
+    fly.headingExtra -= Math.tan(Math.max(-1.2, Math.min(1.2, rollRad))) * 0.9 * dt;
+  }
+  _yawQ.setFromAxisAngle(UP, fly.headingExtra);
+  plane.quaternion.copy(_yawQ).multiply(cur);
+
+  _f.set(0, 0, -1).applyQuaternion(plane.quaternion);
+  plane.position.addScaledVector(_f, speed * dt);
+  fly.dist += speed * dt;
+  if (plane.position.y < GROUND_Y + 0.6) plane.position.y = GROUND_Y + 0.6; // não atravessa o chão
+
+  // rastro
+  trailAcc += speed * dt;
+  if (trailAcc > 0.25) {
+    trailAcc = 0;
+    const arr = trailGeo.attributes.position.array;
+    if (trailLen < TRAIL_N) trailLen++;
+    else arr.copyWithin(0, 3, TRAIL_N * 3);
+    const i = (trailLen - 1) * 3;
+    arr[i] = plane.position.x; arr[i + 1] = plane.position.y; arr[i + 2] = plane.position.z;
+    trailGeo.attributes.position.needsUpdate = true;
+    trailGeo.setDrawRange(0, trailLen);
+  }
+
+  // câmera de perseguição (atrás e acima, alinhada ao rumo)
+  if ($('chase').checked) {
+    _e.setFromQuaternion(plane.quaternion, 'YXZ');
+    _camDesired.set(0, 2.5, 7).applyAxisAngle(UP, _e.y).add(plane.position);
+    camera.position.lerp(_camDesired, 1 - Math.pow(0.02, dt));
+  }
+  controls.target.lerp(plane.position, 1 - Math.pow(0.001, dt));
+
+  // chão e sombra acompanham
+  grid.position.x = Math.round(plane.position.x); grid.position.z = Math.round(plane.position.z);
+  shadow.position.x = plane.position.x; shadow.position.z = plane.position.z;
+  const h = plane.position.y - GROUND_Y;
+  shadow.scale.setScalar(Math.max(0.3, 1.5 / Math.max(1, h * 0.5)));
+  $('alt').textContent = h.toFixed(1) + ' m';
+  $('dist').textContent = fly.dist.toFixed(0) + ' m';
+}
+$('btnFly').onclick = () => setFly(!fly.on);
+$('btnRespawn').onclick = respawn;
+$('speed').oninput = () => $('speedV').textContent = $('speed').value;
+
 // ---------- Loop ----------
 function animate() {
   requestAnimationFrame(animate);
+  const nowT = performance.now(); const frameDt = Math.min((nowT - lastFrameT) / 1000, 0.1); lastFrameT = nowT;
+  if (!fly.on) flyCamera(frameDt);
   const smooth = $('smooth').checked;
   cur.slerp(tq, smooth ? 0.25 : 1);
-  plane.quaternion.copy(cur);
+  if (fly.on) stepFlight(frameDt);
+  else plane.quaternion.copy(cur);
   plane.userData.prop.rotation.z += 0.4;
   controls.update();
   renderer.render(scene, camera);
@@ -415,7 +580,7 @@ $('btnDemo').onclick = () => {
     t += 0.02;
     onSample({ r: 35 * Math.sin(t), p: 20 * Math.sin(t * 0.7), y: 40 * Math.sin(t * 0.3),
       ax: 3 * Math.sin(t * 2), ay: 2 * Math.cos(t * 1.3), az: 9.8 + Math.sin(t * 4),
-      gx: 60 * Math.cos(t), gy: 40 * Math.cos(t * 0.7), gz: 30 * Math.cos(t * 0.3), t: 27.5 });
+      gx: 60 * Math.cos(t), gy: 40 * Math.cos(t * 0.7), gz: 30 * Math.cos(t * 0.3), t: 27.5 }, true);
   }, 20);
 };
 
@@ -423,7 +588,7 @@ $('btnRef').onclick = () => { setRef(qWorld); yawOffset = 0; log('posição atua
 $('btnClearRef').onclick = () => { setRef(null); yawOffset = 0; firstDataT = performance.now(); };
 $('btnZeroYaw').onclick = () => { const e = new THREE.Euler().setFromQuaternion(qRel, 'YXZ'); yawOffset = e.y * R2D; };
 $('btnCal').onclick = () => { if (sendCmd) { sendCmd('c'); log('calibrando gyro — mantenha parado 1s'); } else log('sem conexão'); };
-$('btnCam').onclick = () => { camera.position.copy(CAM0); controls.target.set(0, 0, 0); };
+$('btnCam').onclick = () => { camera.position.copy(CAM0).add(plane.position); controls.target.copy(plane.position); };
 </script>
 </body>
 </html>
